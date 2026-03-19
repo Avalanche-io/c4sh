@@ -1,0 +1,35 @@
+# Security Policy
+
+## Supported Versions
+
+| Version | Supported          |
+| ------- | ------------------ |
+| main branch | :white_check_mark: |
+
+## Reporting a Vulnerability
+
+We take security vulnerabilities seriously. If you discover a security issue in c4sh, please report it responsibly.
+
+### How to Report
+
+1. **DO NOT** create a public GitHub issue for security vulnerabilities
+2. Report security issues via GitHub's private vulnerability reporting:
+   - Go to https://github.com/Avalanche-io/c4sh/security/advisories
+   - Click "Report a vulnerability"
+   - Provide a detailed description
+   - Include steps to reproduce if possible
+
+### Response Timeline
+
+- **Initial Response**: Within 48 hours
+- **Status Update**: Within 7 days
+- **Resolution Target**: 30 days for critical issues, 90 days for lower severity
+
+## Security Considerations
+
+c4sh wraps shell commands to operate on c4m files. Users should be aware:
+
+- c4m files from untrusted sources may describe symlinks pointing outside the expected tree. c4sh validates symlink targets during extraction to prevent path traversal.
+- `c4sh cp` from c4m to real filesystem writes files to disk. Review the c4m contents before extracting untrusted manifests.
+- The content store (`C4_STORE`) holds files by C4 ID. Access to the store grants read access to any stored content.
+- `c4sh rsync` uses ssh. Standard ssh security practices apply.

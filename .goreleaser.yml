@@ -1,0 +1,38 @@
+version: 2
+
+builds:
+  - id: c4sh
+    main: .
+    binary: c4sh
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - name_template: "c4sh_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - name: c4sh
+    repository:
+      owner: Avalanche-io
+      name: homebrew-tap
+    homepage: "https://github.com/Avalanche-io/c4sh"
+    description: "Content-addressed shell — edit filesystems as text"
