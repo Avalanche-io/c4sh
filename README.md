@@ -1,7 +1,7 @@
 # c4sh — Edit Filesystems as Text
 
 [![CI](https://github.com/Avalanche-io/c4sh/actions/workflows/ci.yml/badge.svg)](https://github.com/Avalanche-io/c4sh/actions/workflows/ci.yml)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 
 In Unix, everything is a file. In c4sh, every filesystem is a file too —
 a c4m file. `cd` into it, `ls` its entries, `mv` things around. You're

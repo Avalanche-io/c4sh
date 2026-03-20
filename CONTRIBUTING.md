@@ -48,4 +48,4 @@ Report issues at https://github.com/Avalanche-io/c4sh/issues
 
 ## License
 
-By contributing to c4sh, you agree that your contributions will be licensed under the MIT License. See [LICENSE](LICENSE) for details.
+By contributing to c4sh, you agree that your contributions will be licensed under the Apache License. See [LICENSE](LICENSE) for details.
