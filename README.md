@@ -179,6 +179,10 @@ once, access from either tool.
 - `rsync` requires a local filesystem store (not S3).
 - Commands inside c4m context silently ignore unrecognized flags.
 
+## Design Decisions
+
+See the [FAQ](https://github.com/Avalanche-io/c4/blob/main/docs/faq.md) for design decisions including SHA-512 permanence, the c4m format, and content store scaling.
+
 ## Requirements
 
 - [c4](https://github.com/Avalanche-io/c4) CLI
