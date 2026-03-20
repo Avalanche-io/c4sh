@@ -1,5 +1,8 @@
 # c4sh — Edit Filesystems as Text
 
+[![CI](https://github.com/Avalanche-io/c4sh/actions/workflows/ci.yml/badge.svg)](https://github.com/Avalanche-io/c4sh/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 In Unix, everything is a file. In c4sh, every filesystem is a file too —
 a c4m file. `cd` into it, `ls` its entries, `mv` things around. You're
 editing a plain text description of a filesystem with the same commands
@@ -19,11 +22,10 @@ $ cd
 
 ## Install
 
-```bash
-brew install Avalanche-io/tap/c4sh
-```
+c4sh is part of the [c4 toolkit](https://github.com/Avalanche-io/c4).
+See the c4 README for installation instructions.
 
-Then add one line to your shell:
+Then add shell integration:
 
 ```bash
 # bash / zsh
