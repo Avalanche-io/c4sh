@@ -4,15 +4,17 @@ Thank you for your interest in contributing to c4sh! This document provides guid
 
 ## Project Structure
 
-c4sh is a shell integration tool that makes c4m files behave like directories. It depends on the [c4](https://github.com/Avalanche-io/c4) library for manifest parsing, encoding, and content store operations.
+c4sh is a shell integration tool that makes c4m files behave like directories. It depends on the [c4](https://github.com/Avalanche-io/c4) library for c4m parsing, encoding, and content store operations.
 
 ```
-main.go          — command dispatch
-c4mutil.go       — shared manifest and store helpers
-cmd_*.go         — one file per command (cd, ls, cat, cp, mv, rm, mkdir, pool, ingest, rsync)
-cmd_shellinit.go — shell integration scripts (bash/zsh)
-cmd_complete.go  — tab completion
-internal/ctx/    — shell context (environment variable management)
+main.go              — command dispatch
+c4mutil.go           — shared c4m and store helpers
+cmd_*.go             — one file per command (cd, ls, cat, cp, mv, rm, mkdir, pool, ingest, rsync)
+cmd_shellinit.go     — shell integration scripts (bash/zsh/PowerShell)
+cmd_complete.go      — tab completion
+platform_unix.go     — Unix exec and command lookup
+platform_windows.go  — Windows exec and command lookup
+internal/ctx/        — shell context (environment variable management)
 ```
 
 ## Development

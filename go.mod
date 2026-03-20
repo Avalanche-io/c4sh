@@ -1,11 +1,9 @@
 module github.com/Avalanche-io/c4sh
 
-go 1.16
-
-replace github.com/Avalanche-io/c4 => ../c4
+go 1.25.0
 
 require (
-	github.com/Avalanche-io/c4 v1.0.0
+	github.com/Avalanche-io/c4 v1.0.4
 	github.com/mattn/go-isatty v0.0.20
 )
 

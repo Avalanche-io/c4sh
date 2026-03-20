@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +50,7 @@ func runLs(args []string) {
 			m, err := loadManifest(cur.C4mPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
-				os.Exit(1)
+				osExit(1)
 			}
 			entries := entriesAtPath(m, cur.CWD)
 			printEntries(entries, longFormat, showAll, onePerLine)
@@ -69,7 +70,7 @@ func runLs(args []string) {
 			m, err := loadManifest(abs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
-				os.Exit(1)
+				osExit(1)
 			}
 			listPath(m, subPath, longFormat, showAll, onePerLine)
 			continue
@@ -81,7 +82,7 @@ func runLs(args []string) {
 			m, err := loadManifest(abs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
-				os.Exit(1)
+				osExit(1)
 			}
 			entries := m.Root()
 			printEntries(entries, longFormat, showAll, onePerLine)
@@ -94,7 +95,7 @@ func runLs(args []string) {
 			m, err := loadManifest(abs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
-				os.Exit(1)
+				osExit(1)
 			}
 			entries := m.Root()
 			printEntries(entries, longFormat, showAll, onePerLine)
@@ -106,7 +107,7 @@ func runLs(args []string) {
 			m, err := loadManifest(cur.C4mPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
-				os.Exit(1)
+				osExit(1)
 			}
 			resolved := cur.Resolve(p)
 			listPath(m, resolved, longFormat, showAll, onePerLine)
@@ -123,9 +124,18 @@ func runLs(args []string) {
 // If the path points to a file, shows that single entry.
 // If the path points to a directory, shows its children.
 func listPath(m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) {
+	if err := listPathTo(os.Stdout, m, subPath, long, showAll, onePerLine); err != nil {
+		fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
+		osExit(1)
+	}
+}
+
+// listPathTo lists entries at a given path within a manifest, writing to w.
+// Returns an error instead of calling os.Exit.
+func listPathTo(w io.Writer, m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) error {
 	if subPath == "" {
-		printEntries(m.Root(), long, showAll, onePerLine)
-		return
+		printEntriesTo(w, m.Root(), long, showAll, onePerLine, false)
+		return nil
 	}
 
 	// Try as a directory first (with trailing /)
@@ -136,8 +146,8 @@ func listPath(m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) {
 	dirEntry := findEntry(m, dirPath)
 	if dirEntry != nil && dirEntry.IsDir() {
 		entries := m.Children(dirEntry)
-		printEntries(entries, long, showAll, onePerLine)
-		return
+		printEntriesTo(w, entries, long, showAll, onePerLine, false)
+		return nil
 	}
 
 	// Try as a file (without trailing /)
@@ -145,47 +155,58 @@ func listPath(m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) {
 	fileEntry := findEntry(m, filePath)
 	if fileEntry != nil && !fileEntry.IsDir() {
 		if long {
-			printLongEntry(fileEntry)
+			printLongEntryTo(w, fileEntry)
 		} else {
-			fmt.Println(fileEntry.Name)
+			fmt.Fprintln(w, fileEntry.Name)
 		}
-		return
+		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "c4sh: ls: %s: no such file or directory\n", subPath)
-	os.Exit(1)
+	return fmt.Errorf("%s: no such file or directory", subPath)
 }
 
 // printEntries outputs a list of entries with the appropriate format.
 func printEntries(entries []*c4m.Entry, long, showAll, onePerLine bool) {
-	isTTY := isTerminal()
+	printEntriesTo(os.Stdout, entries, long, showAll, onePerLine, isTerminal())
+}
+
+// printEntriesTo outputs a list of entries with the appropriate format to w.
+func printEntriesTo(w io.Writer, entries []*c4m.Entry, long, showAll, onePerLine, isTTY bool) {
 	for _, e := range entries {
 		if !showAll && strings.HasPrefix(e.Name, ".") {
 			continue
 		}
 		if long {
-			printLongEntry(e)
+			printLongEntryTo(w, e)
 		} else if onePerLine {
-			fmt.Println(e.Name)
+			fmt.Fprintln(w, e.Name)
+		} else if !isTTY {
+			// When piped, one entry per line (matches real ls behavior)
+			fmt.Fprintln(w, e.Name)
 		} else {
 			name := e.Name
-			if isTTY && e.IsDir() {
-				fmt.Printf("\033[1;34m%s\033[0m  ", name)
-			} else if isTTY && e.Mode&0111 != 0 {
-				fmt.Printf("\033[1;32m%s\033[0m  ", name)
+			if e.IsDir() {
+				fmt.Fprintf(w, "\033[1;34m%s\033[0m  ", name)
+			} else if e.Mode&0111 != 0 {
+				fmt.Fprintf(w, "\033[1;32m%s\033[0m  ", name)
 			} else {
-				fmt.Printf("%s  ", name)
+				fmt.Fprintf(w, "%s  ", name)
 			}
 		}
 	}
-	if !long && !onePerLine && len(entries) > 0 {
-		fmt.Println()
+	if !long && !onePerLine && isTTY && len(entries) > 0 {
+		fmt.Fprintln(w)
 	}
 }
 
 // printLongEntry prints a single entry in long format matching c4m entry format:
 // mode timestamp size name [-> target] c4id
 func printLongEntry(e *c4m.Entry) {
+	printLongEntryTo(os.Stdout, e)
+}
+
+// printLongEntryTo prints a single entry in long format to w.
+func printLongEntryTo(w io.Writer, e *c4m.Entry) {
 	// Mode
 	mode := e.Mode.String()
 	if len(mode) > 10 {
@@ -221,7 +242,7 @@ func printLongEntry(e *c4m.Entry) {
 		c4id = e.C4ID.String()
 	}
 
-	fmt.Printf("%s  %8s %s %s %s\n", mode, size, ts, name, c4id)
+	fmt.Fprintf(w, "%s  %8s %s %s %s\n", mode, size, ts, name, c4id)
 }
 
 // isTerminal returns true if stdout is a terminal.

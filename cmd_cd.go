@@ -17,9 +17,23 @@ import (
 //
 // Outputs shell variable assignments (export/unset) and builtin cd commands.
 func runCd(args []string) {
+	// Check for --powershell flag
+	var psMode bool
+	var filtered []string
+	for _, a := range args {
+		if a == "--powershell" {
+			psMode = true
+		} else {
+			filtered = append(filtered, a)
+		}
+	}
+	if psMode {
+		shellFormat = "powershell"
+	}
+
 	target := ""
-	if len(args) > 0 {
-		target = args[0]
+	if len(filtered) > 0 {
+		target = filtered[0]
 	}
 
 	cur := ctx.Current()
@@ -30,14 +44,19 @@ func runCd(args []string) {
 			exitContext("")
 		} else {
 			home, _ := os.UserHomeDir()
-			fmt.Printf("builtin cd %q\n", home)
+			var b strings.Builder
+			writeCd(&b, home)
+			fmt.Print(b.String())
 		}
 		return
 	}
 
-	// cd - = return to previous directory
+	// cd - = return to previous directory (also exits c4m context)
 	if target == "-" {
-		fmt.Println("builtin cd -")
+		var b strings.Builder
+		writeUnsetEnv(&b, "C4_CONTEXT", "C4_CWD")
+		writeCd(&b, "-")
+		fmt.Print(b.String())
 		return
 	}
 
@@ -73,7 +92,9 @@ func runCd(args []string) {
 	}
 
 	// Case 5: target is a real directory — pass through to builtin cd
-	fmt.Printf("builtin cd %q\n", target)
+	var b strings.Builder
+	writeCd(&b, target)
+	fmt.Print(b.String())
 }
 
 // enterContext enters a c4m file at its root.
@@ -83,24 +104,32 @@ func enterContext(c4mFile string) {
 
 // enterContextAt sets up c4m context at a specific subpath.
 func enterContextAt(c4mFile, subPath string) {
-	abs, err := filepath.Abs(c4mFile)
+	cmds, err := enterContextCmds(c4mFile, subPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "c4sh: cd: %v\n", err)
-		return
+		osExit(1)
+	}
+	fmt.Print(cmds)
+}
+
+// enterContextCmds returns shell commands to enter a c4m context.
+// Returns the shell eval string or an error.
+func enterContextCmds(c4mFile, subPath string) (string, error) {
+	abs, err := filepath.Abs(c4mFile)
+	if err != nil {
+		return "", err
 	}
 
 	// Verify the c4m file exists
 	if _, err := os.Stat(abs); err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cd: %s: not found\n", c4mFile)
-		return
+		return "", fmt.Errorf("%s: not found", c4mFile)
 	}
 
 	// If a subpath is specified, verify it exists in the c4m
 	if subPath != "" {
 		m, err := loadManifest(abs)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "c4sh: cd: %v\n", err)
-			return
+			return "", err
 		}
 		// Ensure directory path ends with /
 		dirPath := subPath
@@ -110,23 +139,36 @@ func enterContextAt(c4mFile, subPath string) {
 		e := findEntry(m, dirPath)
 		if e == nil || !e.IsDir() {
 			name := strings.TrimSuffix(filepath.Base(abs), ".c4m")
-			fmt.Fprintf(os.Stderr, "c4sh: cd: %s: no such directory in %s\n", subPath, name)
-			return
+			return "", fmt.Errorf("%s: no such directory in %s", subPath, name)
 		}
 		subPath = dirPath
 	}
 
-	fmt.Printf("export C4_CONTEXT=%q\n", abs)
-	fmt.Printf("export C4_CWD=%q\n", subPath)
+	var b strings.Builder
+	writeSetEnv(&b, "C4_CONTEXT", abs)
+	writeSetEnv(&b, "C4_CWD", subPath)
+	return b.String(), nil
 }
 
 // navigateWithin navigates within the current c4m context.
 func navigateWithin(cur *ctx.Context, target string) {
+	cmds, err := navigateWithinCmds(cur, target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "c4sh: cd: %v\n", err)
+		osExit(1)
+	}
+	fmt.Print(cmds)
+}
+
+// navigateWithinCmds returns shell commands to navigate within a c4m context.
+// Returns the shell eval string or an error.
+func navigateWithinCmds(cur *ctx.Context, target string) (string, error) {
 	// Absolute filesystem path = exit context
 	if filepath.IsAbs(target) {
-		exitContext("")
-		fmt.Printf("builtin cd %q\n", target)
-		return
+		var b strings.Builder
+		b.WriteString(exitContextCmds(""))
+		writeCd(&b, target)
+		return b.String(), nil
 	}
 
 	// Resolve the new path within the c4m
@@ -134,15 +176,15 @@ func navigateWithin(cur *ctx.Context, target string) {
 
 	// If resolved to root, just update CWD
 	if newPath == "" {
-		fmt.Printf("export C4_CWD=%q\n", "")
-		return
+		var b strings.Builder
+		writeSetEnv(&b, "C4_CWD", "")
+		return b.String(), nil
 	}
 
 	// Verify the directory exists in the c4m
 	m, err := loadManifest(cur.C4mPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cd: %v\n", err)
-		return
+		return "", err
 	}
 
 	// Ensure it ends with /
@@ -152,18 +194,58 @@ func navigateWithin(cur *ctx.Context, target string) {
 	}
 	e := findEntry(m, dirPath)
 	if e == nil || !e.IsDir() {
-		fmt.Fprintf(os.Stderr, "c4sh: cd: %s: no such directory in %s\n",
-			target, cur.C4mName())
-		return
+		return "", fmt.Errorf("%s: no such directory in %s", target, cur.C4mName())
 	}
 
-	fmt.Printf("export C4_CWD=%q\n", dirPath)
+	var b strings.Builder
+	writeSetEnv(&b, "C4_CWD", dirPath)
+	return b.String(), nil
 }
 
 // exitContext clears c4m context.
 func exitContext(realPath string) {
-	fmt.Println("unset C4_CONTEXT C4_CWD")
+	fmt.Print(exitContextCmds(realPath))
+}
+
+// exitContextCmds returns shell commands to exit the c4m context.
+func exitContextCmds(realPath string) string {
+	var b strings.Builder
+	writeUnsetEnv(&b, "C4_CONTEXT", "C4_CWD")
 	if realPath != "" {
-		fmt.Printf("builtin cd %q\n", realPath)
+		writeCd(&b, realPath)
+	}
+	return b.String()
+}
+
+// shellFormat controls output syntax. Default is "bash"; set to "powershell"
+// when --powershell flag is passed.
+var shellFormat = "bash"
+
+// writeSetEnv writes a shell-appropriate environment variable assignment.
+func writeSetEnv(b *strings.Builder, key, value string) {
+	if shellFormat == "powershell" {
+		fmt.Fprintf(b, "$env:%s = %q\n", key, value)
+	} else {
+		fmt.Fprintf(b, "export %s=%q\n", key, value)
+	}
+}
+
+// writeUnsetEnv writes a shell-appropriate environment variable removal.
+func writeUnsetEnv(b *strings.Builder, keys ...string) {
+	if shellFormat == "powershell" {
+		for _, k := range keys {
+			fmt.Fprintf(b, "Remove-Item Env:\\%s -ErrorAction SilentlyContinue\n", k)
+		}
+	} else {
+		fmt.Fprintf(b, "unset %s\n", strings.Join(keys, " "))
+	}
+}
+
+// writeCd writes a shell-appropriate change-directory command.
+func writeCd(b *strings.Builder, path string) {
+	if shellFormat == "powershell" {
+		fmt.Fprintf(b, "Set-Location %q\n", path)
+	} else {
+		fmt.Fprintf(b, "builtin cd %q\n", path)
 	}
 }

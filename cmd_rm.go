@@ -32,7 +32,7 @@ func runRm(args []string) {
 
 	if len(paths) == 0 {
 		fmt.Fprintf(os.Stderr, "Usage: c4sh rm [-rf] <path>...\n")
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Resolve first path to determine c4m file
@@ -48,68 +48,7 @@ func runRm(args []string) {
 		die("rm: %v", err)
 	}
 
-	var errs int
-	modified := false
-
-	for _, p := range paths {
-		pC4m, subPath := resolveContextPath(p)
-		if pC4m == "" {
-			pC4m = c4mFile
-			subPath = p
-		}
-		if pC4m != c4mFile {
-			fmt.Fprintf(os.Stderr, "c4sh: rm: cannot remove across c4m files\n")
-			errs++
-			continue
-		}
-		if subPath == "" {
-			fmt.Fprintf(os.Stderr, "c4sh: rm: refusing to remove c4m root\n")
-			errs++
-			continue
-		}
-
-		// Try both as file and directory
-		entry, idx := findEntryByPath(m, subPath)
-		if entry == nil {
-			// Try with trailing slash for directories
-			entry, idx = findEntryByPath(m, strings.TrimSuffix(subPath, "/")+"/")
-		}
-		if entry == nil {
-			if !force {
-				fmt.Fprintf(os.Stderr, "c4sh: rm: %s: not found\n", p)
-				errs++
-			}
-			continue
-		}
-
-		if entry.IsDir() && !recursive {
-			fmt.Fprintf(os.Stderr, "c4sh: rm: %s: is a directory (use -r)\n", p)
-			errs++
-			continue
-		}
-
-		// Collect entries to remove: the entry itself + descendants
-		toRemove := map[int]bool{idx: true}
-		if entry.IsDir() {
-			for i := idx + 1; i < len(m.Entries); i++ {
-				if m.Entries[i].Depth <= entry.Depth {
-					break
-				}
-				toRemove[i] = true
-			}
-		}
-
-		// Remove in reverse order to preserve indices
-		newEntries := make([]*c4m.Entry, 0, len(m.Entries)-len(toRemove))
-		for i, e := range m.Entries {
-			if !toRemove[i] {
-				newEntries = append(newEntries, e)
-			}
-		}
-		m.Entries = newEntries
-		m.InvalidateIndex()
-		modified = true
-	}
+	modified, errs := rmEntries(m, paths, recursive, force)
 
 	if modified {
 		if err := saveManifest(c4mFile, m); err != nil {
@@ -118,6 +57,52 @@ func runRm(args []string) {
 	}
 
 	if errs > 0 {
-		os.Exit(1)
+		osExit(1)
 	}
+}
+
+// rmEntries removes entries from a manifest by subpath. Returns whether the
+// manifest was modified and the number of errors encountered.
+// Each path in subPaths is treated as a subpath within the manifest (not a
+// full c4m-qualified path).
+func rmEntries(m *c4m.Manifest, subPaths []string, recursive, force bool) (modified bool, errs int) {
+	for _, subPath := range subPaths {
+		// Try both as file and directory
+		entry := m.GetEntry(subPath)
+		if entry == nil {
+			// Try with trailing slash for directories
+			entry = m.GetEntry(strings.TrimSuffix(subPath, "/") + "/")
+		}
+		if entry == nil {
+			if !force {
+				errs++
+			}
+			continue
+		}
+
+		if entry.IsDir() && !recursive {
+			errs++
+			continue
+		}
+
+		// Collect entries to remove: the entry itself + descendants
+		toRemove := map[*c4m.Entry]bool{entry: true}
+		if entry.IsDir() {
+			for _, d := range m.Descendants(entry) {
+				toRemove[d] = true
+			}
+		}
+
+		// Remove entries
+		newEntries := make([]*c4m.Entry, 0, len(m.Entries)-len(toRemove))
+		for _, e := range m.Entries {
+			if !toRemove[e] {
+				newEntries = append(newEntries, e)
+			}
+		}
+		m.Entries = newEntries
+		m.InvalidateIndex()
+		modified = true
+	}
+	return
 }

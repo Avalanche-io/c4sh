@@ -1,13 +1,11 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/Avalanche-io/c4sh/internal/ctx"
 )
@@ -35,7 +33,7 @@ func runCat(args []string) {
 			c4mFile, subPath := splitC4mPath(arg)
 			if subPath == "" {
 				fmt.Fprintf(os.Stderr, "c4sh: cat: specify a file path: %s:<path>\n", c4mFile)
-				os.Exit(1)
+				osExit(1)
 			}
 			abs, _ := filepath.Abs(c4mFile)
 			catFromC4m(abs, subPath)
@@ -45,11 +43,11 @@ func runCat(args []string) {
 		// Bare .c4m or extension-free c4m reference
 		if strings.HasSuffix(arg, ".c4m") {
 			fmt.Fprintf(os.Stderr, "c4sh: cat: %s: is a c4m file, not a content file\n", arg)
-			os.Exit(1)
+			osExit(1)
 		}
 		if _, err := os.Stat(arg + ".c4m"); err == nil {
 			fmt.Fprintf(os.Stderr, "c4sh: cat: %s: is a c4m file, not a content file\n", arg)
-			os.Exit(1)
+			osExit(1)
 		}
 
 		// In c4m context: resolve relative to current CWD
@@ -67,62 +65,64 @@ func runCat(args []string) {
 
 // catFromC4m reads content for a file entry from the store.
 func catFromC4m(c4mPath, subPath string) {
+	if err := catFromC4mTo(os.Stdout, c4mPath, subPath); err != nil {
+		fmt.Fprintf(os.Stderr, "c4sh: cat: %v\n", err)
+		osExit(1)
+	}
+}
+
+// catFromC4mTo reads content for a file entry from the store and writes it to w.
+// Returns an error instead of calling os.Exit.
+func catFromC4mTo(w io.Writer, c4mPath, subPath string) error {
 	m, err := loadManifest(c4mPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cat: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	e := findEntry(m, subPath)
 	if e == nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cat: %s: not found in %s\n",
-			subPath, filepath.Base(c4mPath))
-		os.Exit(1)
+		return fmt.Errorf("%s: not found in %s", subPath, filepath.Base(c4mPath))
 	}
 
 	if e.IsDir() {
-		fmt.Fprintf(os.Stderr, "c4sh: cat: %s: is a directory\n", subPath)
-		os.Exit(1)
+		return fmt.Errorf("%s: is a directory", subPath)
 	}
 
 	if e.C4ID.IsNil() {
-		// Null C4 ID means empty file or content not available
 		if e.Size == 0 {
-			return // empty file, nothing to output
+			return nil // empty file, nothing to output
 		}
-		fmt.Fprintf(os.Stderr, "c4sh: cat: %s: no content (null C4 ID)\n", subPath)
-		os.Exit(1)
+		return fmt.Errorf("%s: no content (null C4 ID)", subPath)
 	}
 
 	s, err := openStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cat: store error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("store error: %v", err)
 	}
 	if s == nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cat: no store configured\n")
-		os.Exit(1)
+		return fmt.Errorf("no store configured")
 	}
 
 	rc, err := s.Open(e.C4ID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cat: content not available for %s (%s)\n",
-			subPath, e.C4ID)
-		os.Exit(1)
+		return fmt.Errorf("content not available for %s (%s)", subPath, e.C4ID)
 	}
 	defer rc.Close()
 
-	copyToStdout(rc)
+	if _, err := io.Copy(w, rc); err != nil {
+		return fmt.Errorf("write error: %v", err)
+	}
+	return nil
 }
 
-// copyToStdout copies src to stdout, handling EPIPE (broken pipe) gracefully.
+// copyToStdout copies src to stdout, handling broken pipe gracefully.
 func copyToStdout(src io.Reader) {
 	if _, err := io.Copy(os.Stdout, src); err != nil {
-		if errors.Is(err, syscall.EPIPE) {
-			os.Exit(0)
+		if isBrokenPipe(err) {
+			osExit(0)
 		}
 		fmt.Fprintf(os.Stderr, "c4sh: cat: write error: %v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/Avalanche-io/c4/c4m"
@@ -22,7 +23,7 @@ func loadManifest(c4mPath string) (*c4m.Manifest, error) {
 
 // saveManifest atomically writes a manifest to a c4m file.
 func saveManifest(c4mPath string, m *c4m.Manifest) error {
-	tmp, err := os.CreateTemp("", "c4sh-*.c4m")
+	tmp, err := os.CreateTemp(filepath.Dir(c4mPath), ".c4sh-*.c4m")
 	if err != nil {
 		return err
 	}
@@ -86,15 +87,13 @@ func resolveContextPath(userPath string) (c4mFile string, subPath string) {
 	return "", userPath
 }
 
-// findEntry finds an entry in a manifest by its tree path.
-// The subPath uses "/" separated components where directory names include
-// their trailing slash (e.g., "shots/010/" or "shots/010/comp.exr").
+// findEntry finds an entry in a manifest by its full path.
 // Returns nil if not found or if subPath is empty (root level).
 func findEntry(m *c4m.Manifest, subPath string) *c4m.Entry {
 	if subPath == "" {
 		return nil // root level
 	}
-	return walkTreePath(m, subPath)
+	return m.GetEntry(subPath)
 }
 
 // entriesAtPath returns direct children at a given path within the manifest.
@@ -109,82 +108,17 @@ func entriesAtPath(m *c4m.Manifest, subPath string) []*c4m.Entry {
 	if !strings.HasSuffix(dirPath, "/") {
 		dirPath += "/"
 	}
-	e := walkTreePath(m, dirPath)
+	e := m.GetEntry(dirPath)
 	if e == nil {
 		return nil
 	}
 	return m.Children(e)
 }
 
-// walkTreePath traverses the manifest tree to find an entry by its full
-// path. Each path component is matched against entry names at the
-// corresponding tree level using Root() and Children().
-func walkTreePath(m *c4m.Manifest, treePath string) *c4m.Entry {
-	parts := splitPathComponents(treePath)
-	if len(parts) == 0 {
-		return nil
-	}
-
-	// Single component: search root entries directly
-	if len(parts) == 1 {
-		for _, e := range m.Root() {
-			if e.Name == parts[0] {
-				return e
-			}
-		}
-		return nil
-	}
-
-	// Multi-component: walk the tree
-	current := m.Root()
-	for i, part := range parts {
-		var found *c4m.Entry
-		for _, e := range current {
-			if e.Name == part {
-				found = e
-				break
-			}
-		}
-		if found == nil {
-			return nil
-		}
-		if i == len(parts)-1 {
-			return found
-		}
-		if !found.IsDir() {
-			return nil
-		}
-		current = m.Children(found)
-	}
-	return nil
-}
-
-// splitPathComponents splits a tree path into its name components.
-// Directory components retain their trailing "/".
-// Example: "shots/010/comp.exr" → ["shots/", "010/", "comp.exr"]
-func splitPathComponents(p string) []string {
-	var parts []string
-	for p != "" {
-		i := strings.IndexByte(p, '/')
-		if i < 0 {
-			parts = append(parts, p)
-			break
-		}
-		parts = append(parts, p[:i+1])
-		p = p[i+1:]
-	}
-	return parts
-}
-
-// entryFullPath reconstructs the full path of an entry from root.
+// entryFullPath returns the full path of an entry, stripping the
+// trailing slash for directories.
 func entryFullPath(m *c4m.Manifest, e *c4m.Entry) string {
-	ancestors := m.Ancestors(e)
-	parts := make([]string, 0, len(ancestors)+1)
-	for _, a := range ancestors {
-		parts = append(parts, strings.TrimSuffix(a.Name, "/"))
-	}
-	parts = append(parts, strings.TrimSuffix(e.Name, "/"))
-	return strings.Join(parts, "/")
+	return strings.TrimSuffix(m.EntryPath(e), "/")
 }
 
 // storeRoot returns the filesystem root of a store, if it has one.
@@ -197,8 +131,12 @@ func storeRoot(s c4store.Store) string {
 	return ""
 }
 
+// osExit is the function used to exit the process. It can be replaced
+// in tests to prevent actual exits.
+var osExit = os.Exit
+
 // die prints an error and exits.
 func die(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "c4sh: "+format+"\n", args...)
-	os.Exit(1)
+	osExit(1)
 }

@@ -8,10 +8,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 const version = "0.1.0"
@@ -19,7 +16,7 @@ const version = "0.1.0"
 func main() {
 	if len(os.Args) < 2 {
 		usage()
-		os.Exit(0)
+		osExit(0)
 	}
 
 	cmd := os.Args[1]
@@ -73,7 +70,7 @@ func main() {
 		} else {
 			fmt.Fprintf(os.Stderr, "c4sh: unknown command %q\n", cmd)
 			fmt.Fprintf(os.Stderr, "Run 'c4sh help' for usage.\n")
-			os.Exit(1)
+			osExit(1)
 		}
 	}
 }
@@ -101,29 +98,19 @@ Setup:
 `)
 }
 
-// fallthrough execs the real system command, replacing the current process.
+// fallthrough execs the real system command. On Unix this replaces the
+// process; on Windows it runs the command and propagates the exit code.
 func fallthrough_(cmd string, args []string) {
 	path, err := findSystemCommand(cmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "c4sh: %s: command not found\n", cmd)
-		os.Exit(127)
+		osExit(127)
 	}
 	argv := append([]string{cmd}, args...)
-	if err := syscall.Exec(path, argv, os.Environ()); err != nil {
+	if err := execCommand(path, argv); err != nil {
 		fmt.Fprintf(os.Stderr, "c4sh: exec %s: %v\n", cmd, err)
-		os.Exit(1)
+		osExit(1)
 	}
-}
-
-// findSystemCommand finds the real system command, skipping c4sh aliases.
-func findSystemCommand(cmd string) (string, error) {
-	for _, dir := range []string{"/usr/bin", "/bin", "/usr/local/bin"} {
-		p := filepath.Join(dir, cmd)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	return exec.LookPath(cmd)
 }
 
 // isInC4mContext returns true if the user is inside a c4m context.

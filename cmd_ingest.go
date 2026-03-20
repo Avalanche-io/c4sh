@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,7 +89,7 @@ func runIngest(args []string) {
 	}
 
 	if errors > 0 {
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
@@ -114,24 +113,4 @@ func walkTreeStore(root string, fn func(c4.ID)) {
 		fn(id)
 		return nil
 	})
-}
-
-// copyContent copies content from one store to another by C4 ID.
-func copyContent(src c4store.Source, dst c4store.Store, id c4.ID) error {
-	rc, err := src.Open(id)
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-
-	w, err := dst.Create(id)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(w, rc); err != nil {
-		w.Close()
-		return err
-	}
-	return w.Close()
 }

@@ -9,15 +9,25 @@ import (
 
 func runShellInit(args []string) {
 	shell := detectShell(args)
+	script, err := shellInitScript(shell)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "c4sh shell-init: %v\n", err)
+		osExit(1)
+	}
+	fmt.Print(script)
+}
 
+// shellInitScript returns the shell integration script for the given shell name.
+func shellInitScript(shell string) (string, error) {
 	switch shell {
 	case "bash":
-		fmt.Print(bashScript)
+		return bashScript, nil
 	case "zsh":
-		fmt.Print(zshScript)
+		return zshScript, nil
+	case "powershell", "pwsh":
+		return powershellScript, nil
 	default:
-		fmt.Fprintf(os.Stderr, "c4sh shell-init: unsupported shell %q (use --bash or --zsh)\n", shell)
-		os.Exit(1)
+		return "", fmt.Errorf("unsupported shell %q (use --bash, --zsh, or --powershell)", shell)
 	}
 }
 
@@ -28,6 +38,8 @@ func detectShell(args []string) string {
 			return "bash"
 		case "--zsh":
 			return "zsh"
+		case "--powershell", "--pwsh":
+			return "powershell"
 		}
 	}
 
@@ -39,27 +51,88 @@ func detectShell(args []string) string {
 	if strings.HasPrefix(base, "zsh") {
 		return "zsh"
 	}
+	// Check for PowerShell via PSModulePath (set in all PS sessions)
+	if os.Getenv("PSModulePath") != "" {
+		return "powershell"
+	}
 	return base
 }
 
-// Shared shell functions used by both bash and zsh.
-// Uses "function name" syntax (not "name()") to avoid alias expansion.
+// __c4sh_needs_c4m checks if args reference a c4m (colon syntax, .c4m suffix,
+// or extension-free c4m file exists). Used by wrappers to decide whether to
+// route to c4sh or pass through to the real command.
+//
+// The wrappers only intercept when in c4m context OR when args explicitly
+// reference a c4m. Otherwise the user's real command runs untouched.
 const sharedScript = `
 # c4sh shell integration
 # eval "$(c4sh shell-init)" to activate
 
-# cd wrapper: delegate to c4sh cd which outputs shell commands to eval.
+# Helper: returns 0 (true) if any arg looks like a c4m reference.
+__c4sh_needs_c4m() {
+    for arg in "$@"; do
+        case "$arg" in
+            -*) continue ;;          # skip flags
+            *.c4m|*.c4m:*|*:*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# cd is always wrapped — it's the context switch.
 function cd {
     eval "$(command c4sh cd "$@")"
 }
 
-# Shell command wrappers — transparent c4m handling with fallthrough.
-function ls    { command c4sh ls "$@"; }
-function cat   { command c4sh cat "$@"; }
-function cp    { command c4sh cp "$@"; }
-function mv    { command c4sh mv "$@"; }
-function rm    { command c4sh rm "$@"; }
-function mkdir { command c4sh mkdir "$@"; }
+# Wrappers: route to c4sh when in c4m context or args reference a c4m.
+# Otherwise pass through to the real command, preserving user's config.
+function ls {
+    if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
+        command c4sh ls "$@"
+    else
+        command ls "$@"
+    fi
+}
+
+function cat {
+    if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
+        command c4sh cat "$@"
+    else
+        command cat "$@"
+    fi
+}
+
+function cp {
+    if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
+        command c4sh cp "$@"
+    else
+        command cp "$@"
+    fi
+}
+
+function mv {
+    if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
+        command c4sh mv "$@"
+    else
+        command mv "$@"
+    fi
+}
+
+function rm {
+    if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
+        command c4sh rm "$@"
+    else
+        command rm "$@"
+    fi
+}
+
+function mkdir {
+    if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
+        command c4sh mkdir "$@"
+    else
+        command mkdir "$@"
+    fi
+}
 `
 
 const bashScript = sharedScript + `
@@ -71,9 +144,7 @@ __c4sh_prompt() {
         local name
         name=$(basename "$C4_CONTEXT" .c4m)
         local cwd="${C4_CWD:+/$C4_CWD}"
-        # Insert c4 context before the final $ or > in the prompt
         PS1="${__c4sh_original_ps1/\\$ / c4 ${name}:${cwd} \\$ }"
-        # Fallback if substitution didn't match
         if [ "$PS1" = "$__c4sh_original_ps1" ]; then
             PS1="c4 ${name}:${cwd} ${__c4sh_original_ps1}"
         fi
@@ -143,4 +214,110 @@ __c4sh_complete() {
 }
 
 compdef __c4sh_complete ls cat cp mv rm mkdir cd
+`
+
+const powershellScript = `
+# c4sh PowerShell integration
+# Invoke-Expression (c4sh shell-init --powershell)
+
+# Helper: returns $true if any arg looks like a c4m reference.
+function Test-C4mArgs {
+    param([string[]]$Args)
+    foreach ($arg in $Args) {
+        if ($arg -match '\.c4m' -or $arg -match ':') { return $true }
+    }
+    return $false
+}
+
+# Save original aliases/cmdlets so we can restore them in wrappers.
+if (Get-Alias ls -ErrorAction SilentlyContinue) { Remove-Alias ls -Force -ErrorAction SilentlyContinue }
+if (Get-Alias cat -ErrorAction SilentlyContinue) { Remove-Alias cat -Force -ErrorAction SilentlyContinue }
+if (Get-Alias cp -ErrorAction SilentlyContinue) { Remove-Alias cp -Force -ErrorAction SilentlyContinue }
+if (Get-Alias mv -ErrorAction SilentlyContinue) { Remove-Alias mv -Force -ErrorAction SilentlyContinue }
+if (Get-Alias rm -ErrorAction SilentlyContinue) { Remove-Alias rm -Force -ErrorAction SilentlyContinue }
+if (Get-Alias mkdir -ErrorAction SilentlyContinue) { Remove-Alias mkdir -Force -ErrorAction SilentlyContinue }
+
+# cd wrapper: parse c4sh output and set env vars.
+function cd {
+    param([string]$Path)
+    if (-not $Path) { $Path = '' }
+    $output = & c4sh cd --powershell $Path 2>&1
+    foreach ($line in $output) {
+        $line = $line.ToString().Trim()
+        if ($line -match '^\$env:(\w+)\s*=\s*(.*)$') {
+            $varName = $Matches[1]
+            $varValue = $Matches[2].Trim('"', "'")
+            [Environment]::SetEnvironmentVariable($varName, $varValue, 'Process')
+        }
+        elseif ($line -match '^Remove-Item Env:\\(\w+)') {
+            $varName = $Matches[1]
+            [Environment]::SetEnvironmentVariable($varName, $null, 'Process')
+        }
+        elseif ($line -match '^Set-Location (.+)$') {
+            Set-Location $Matches[1]
+        }
+    }
+}
+
+# Wrappers: route to c4sh when in c4m context, otherwise use native cmdlet.
+function ls {
+    if ($env:C4_CONTEXT -or (Test-C4mArgs $args)) {
+        & c4sh ls @args
+    } else {
+        Get-ChildItem @args
+    }
+}
+
+function cat {
+    if ($env:C4_CONTEXT -or (Test-C4mArgs $args)) {
+        & c4sh cat @args
+    } else {
+        Get-Content @args
+    }
+}
+
+function cp {
+    if ($env:C4_CONTEXT -or (Test-C4mArgs $args)) {
+        & c4sh cp @args
+    } else {
+        Copy-Item @args
+    }
+}
+
+function mv {
+    if ($env:C4_CONTEXT -or (Test-C4mArgs $args)) {
+        & c4sh mv @args
+    } else {
+        Move-Item @args
+    }
+}
+
+function rm {
+    if ($env:C4_CONTEXT -or (Test-C4mArgs $args)) {
+        & c4sh rm @args
+    } else {
+        Remove-Item @args
+    }
+}
+
+function mkdir {
+    if ($env:C4_CONTEXT -or (Test-C4mArgs $args)) {
+        & c4sh mkdir @args
+    } else {
+        New-Item -ItemType Directory @args
+    }
+}
+
+# Prompt: show c4m context
+function prompt {
+    $ctx = $env:C4_CONTEXT
+    if ($ctx) {
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($ctx)
+        $cwd = $env:C4_CWD
+        if ($cwd) { $cwd = "/$cwd" }
+        "c4 ${name}:${cwd} PS $($executionContext.SessionState.Path.CurrentLocation)> "
+    } else {
+        "PS $($executionContext.SessionState.Path.CurrentLocation)> "
+    }
+}
 `

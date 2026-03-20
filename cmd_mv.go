@@ -16,7 +16,7 @@ import (
 func runMv(args []string) {
 	if len(args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: c4sh mv <source> <dest>\n")
-		os.Exit(1)
+		osExit(1)
 	}
 
 	src := args[len(args)-2]
@@ -49,22 +49,35 @@ func runMv(args []string) {
 		die("mv: %v", err)
 	}
 
+	if err := mvEntry(m, srcSub, dstSub); err != nil {
+		die("mv: %v", err)
+	}
+
+	if err := saveManifest(srcC4m, m); err != nil {
+		die("mv: %v", err)
+	}
+}
+
+// mvEntry moves or renames an entry within a manifest. The manifest is
+// modified in place via MoveEntry (entry renamed, depths adjusted, re-sorted).
+// srcSub and dstSub are paths relative to the c4m root.
+func mvEntry(m *c4m.Manifest, srcSub, dstSub string) error {
 	// Find source entry by full path
-	srcEntry, srcIdx := findEntryByPath(m, srcSub)
+	srcEntry := m.GetEntry(srcSub)
 	if srcEntry == nil {
-		die("mv: %s: not found", src)
+		return fmt.Errorf("%s: not found", srcSub)
 	}
 
 	// Determine effective destination path
 	effDst := dstSub
 	if effDst == "" {
-		die("mv: cannot move to c4m root")
+		return fmt.Errorf("cannot move to c4m root")
 	}
 
 	// If dest is an existing directory, move source inside it
-	dstEntry, _ := findEntryByPath(m, strings.TrimSuffix(effDst, "/")+"/")
+	dstEntry := m.GetEntry(strings.TrimSuffix(effDst, "/") + "/")
 	if dstEntry == nil {
-		dstEntry, _ = findEntryByPath(m, effDst)
+		dstEntry = m.GetEntry(effDst)
 	}
 	if dstEntry != nil && dstEntry.IsDir() {
 		effDst = path.Join(strings.TrimSuffix(effDst, "/"), strings.TrimSuffix(srcEntry.Name, "/"))
@@ -76,7 +89,7 @@ func runMv(args []string) {
 
 	// Check destination doesn't already exist (unless it's a directory we're moving into)
 	if dstEntry != nil && dstEntry != srcEntry {
-		die("mv: %s: already exists", dst)
+		return fmt.Errorf("%s: already exists", dstSub)
 	}
 
 	// Parse destination into parent path and new name
@@ -86,83 +99,17 @@ func runMv(args []string) {
 		dstName += "/"
 	}
 
-	// Calculate destination depth
-	dstDepth := 0
+	// Find the new parent entry (nil for root level)
+	var newParent *c4m.Entry
 	if dstParent != "" {
-		// Verify parent directory exists
-		parentEntry, _ := findEntryByPath(m, dstParent+"/")
-		if parentEntry == nil {
-			die("mv: %s: parent directory does not exist", effDst)
-		}
-		dstDepth = parentEntry.Depth + 1
-	}
-
-	// Calculate depth delta for descendants
-	depthDelta := dstDepth - srcEntry.Depth
-
-	// Update the source entry
-	srcEntry.Name = dstName
-	srcEntry.Depth = dstDepth
-
-	// If moving a directory, update all descendants' depths
-	if srcEntry.IsDir() {
-		descendants := collectDescendants(m, srcIdx)
-		for _, desc := range descendants {
-			desc.Depth += depthDelta
+		newParent = m.GetEntry(dstParent + "/")
+		if newParent == nil {
+			return fmt.Errorf("%s: parent directory does not exist", effDst)
 		}
 	}
 
-	// Re-sort and save
-	m.SortEntries()
-	if err := saveManifest(srcC4m, m); err != nil {
-		die("mv: %v", err)
-	}
-}
-
-// findEntryByPath finds an entry in the manifest by its full reconstructed path.
-// Returns the entry and its index in m.Entries, or (nil, -1) if not found.
-func findEntryByPath(m *c4m.Manifest, subPath string) (*c4m.Entry, int) {
-	if subPath == "" {
-		return nil, -1
-	}
-	var dirStack []string
-	for i, e := range m.Entries {
-		if e.Depth < len(dirStack) {
-			dirStack = dirStack[:e.Depth]
-		}
-		var fullPath string
-		if len(dirStack) > 0 {
-			fullPath = strings.Join(dirStack, "") + e.Name
-		} else {
-			fullPath = e.Name
-		}
-		if e.IsDir() {
-			for len(dirStack) <= e.Depth {
-				dirStack = append(dirStack, "")
-			}
-			dirStack[e.Depth] = e.Name
-		}
-		if fullPath == subPath {
-			return e, i
-		}
-	}
-	return nil, -1
-}
-
-// collectDescendants returns all entries that are descendants of the entry
-// at the given index (entries following it with greater depth, until depth
-// drops back to the entry's depth or below).
-func collectDescendants(m *c4m.Manifest, idx int) []*c4m.Entry {
-	if idx < 0 || idx >= len(m.Entries) {
-		return nil
-	}
-	parentDepth := m.Entries[idx].Depth
-	var desc []*c4m.Entry
-	for i := idx + 1; i < len(m.Entries); i++ {
-		if m.Entries[i].Depth <= parentDepth {
-			break
-		}
-		desc = append(desc, m.Entries[i])
-	}
-	return desc
+	// Use the c4m package's MoveEntry which handles depth adjustment,
+	// descendant updates, index invalidation, and re-sorting.
+	m.MoveEntry(srcEntry, newParent, dstName)
+	return nil
 }

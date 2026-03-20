@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha512"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +10,8 @@ import (
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
-	c4store "github.com/Avalanche-io/c4/store"
+	"github.com/Avalanche-io/c4/reconcile"
+	"github.com/Avalanche-io/c4/scan"
 )
 
 // runCp implements "c4sh cp" — the universal verb for moving content across
@@ -23,10 +23,10 @@ import (
 //	cp project.c4m:shots/ ./out/     → c4m → real  (extract)
 //	cp project.c4m:shots/ out.c4m:   → c4m → c4m   (instant)
 func runCp(args []string) {
-	// Strip -r/-R flags (always recursive for c4m operations, accept silently)
+	// Strip flags (c4m operations are always recursive; other flags silently ignored)
 	var filtered []string
 	for _, a := range args {
-		if a == "-r" || a == "-R" || a == "--recursive" {
+		if strings.HasPrefix(a, "-") && !strings.Contains(a, ".c4m") && !strings.Contains(a, ":") {
 			continue
 		}
 		filtered = append(filtered, a)
@@ -34,7 +34,7 @@ func runCp(args []string) {
 
 	if len(filtered) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: c4sh cp <source> <dest...>\n")
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Multi-destination: 3+ args means first is source, rest are destinations.
@@ -69,6 +69,8 @@ func runCp(args []string) {
 
 // cpRealToC4m captures a real directory or file into a c4m file.
 // Content goes to the store, structure goes to the c4m.
+//
+// Uses scan.Dir to produce the manifest, then stores content separately.
 func cpRealToC4m(src, dst string) {
 	src = expandHome(src)
 	dstC4m, dstSub := splitC4mPath(dst)
@@ -95,8 +97,7 @@ func cpRealToC4m(src, dst string) {
 	// Determine the base depth for new entries based on dstSub
 	baseDepth := 0
 	if dstSub != "" {
-		baseDepth = strings.Count(dstSub, "/") + 1
-		// Ensure parent directories exist in the manifest
+		baseDepth = strings.Count(strings.TrimSuffix(dstSub, "/"), "/") + 1
 		ensureParentDirs(m, dstSub)
 	}
 
@@ -117,61 +118,38 @@ func cpRealToC4m(src, dst string) {
 		}
 		m.AddEntry(entry)
 	} else {
-		// Directory capture — walk the tree
-		srcBase := src
-		err := filepath.Walk(srcBase, func(p string, fi os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", walkErr)
-				return nil
-			}
-
-			rel, _ := filepath.Rel(srcBase, p)
-			if rel == "." {
-				return nil // skip root itself
-			}
-
-			// Calculate depth from relative path
-			parts := strings.Split(rel, string(filepath.Separator))
-			depth := baseDepth + len(parts) - 1
-
-			name := fi.Name()
-
-			if fi.IsDir() {
-				entry := &c4m.Entry{
-					Name:      name + "/",
-					Depth:     depth,
-					Mode:      fi.Mode() | os.ModeDir,
-					Size:      -1, // computed by propagation
-					Timestamp: fi.ModTime().UTC(),
-				}
-				m.AddEntry(entry)
-				return nil
-			}
-
-			// Skip non-regular files
-			if !fi.Mode().IsRegular() {
-				return nil
-			}
-
-			id, err := storeFile(store, p)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", rel, err)
-				return nil
-			}
-
-			entry := &c4m.Entry{
-				Name:      name,
-				Depth:     depth,
-				Mode:      fi.Mode(),
-				Size:      fi.Size(),
-				Timestamp: fi.ModTime().UTC(),
-				C4ID:      id,
-			}
-			m.AddEntry(entry)
-			return nil
-		})
+		// Directory capture — scan to produce manifest, then store content.
+		scanned, err := scan.Dir(src, scan.WithMode(scan.ModeFull))
 		if err != nil {
-			die("cp: walk: %v", err)
+			die("cp: scan: %v", err)
+		}
+
+		// Store content for each file entry and merge into destination manifest.
+		paths := c4m.EntryPaths(scanned.Entries)
+		for relPath, e := range paths {
+			cp := *e // shallow copy
+
+			// Adjust depth for destination subpath
+			cp.Depth = baseDepth + e.Depth
+
+			if e.IsDir() {
+				m.AddEntry(&cp)
+				continue
+			}
+
+			if !e.Mode.IsRegular() {
+				continue
+			}
+
+			// Store file content
+			absPath := filepath.Join(src, filepath.FromSlash(relPath))
+			id, sErr := storeFile(store, absPath)
+			if sErr != nil {
+				fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", relPath, sErr)
+				continue
+			}
+			cp.C4ID = id
+			m.AddEntry(&cp)
 		}
 	}
 
@@ -182,6 +160,10 @@ func cpRealToC4m(src, dst string) {
 }
 
 // cpC4mToReal extracts content from a c4m file to the real filesystem.
+//
+// For full-manifest and subtree extractions, uses the reconcile package
+// to plan and apply filesystem operations. This gets correct timestamp
+// truncation, deepest-first directory timestamps, and symlink safety.
 func cpC4mToReal(src, dst string) {
 	dst = expandHome(dst)
 	srcC4m, srcSub := splitC4mPath(src)
@@ -209,7 +191,6 @@ func cpC4mToReal(src, dst string) {
 	if len(entries) == 1 && !entries[0].entry.IsDir() {
 		e := entries[0].entry
 		dstPath := dst
-		// If dst is an existing directory, place file inside it
 		if di, err := os.Stat(dst); err == nil && di.IsDir() {
 			dstPath = filepath.Join(dst, e.Name)
 		}
@@ -217,37 +198,36 @@ func cpC4mToReal(src, dst string) {
 		return
 	}
 
-	// Extract subtree
-	if err := os.MkdirAll(dst, 0755); err != nil {
-		die("cp: %v", err)
-	}
-
+	// Build a sub-manifest from the resolved entries for reconcile.
+	subM := c4m.NewManifest()
 	for _, re := range entries {
-		dstPath := filepath.Join(dst, re.relPath)
-		if re.entry.IsDir() {
-			mode := re.entry.Mode.Perm()
-			if mode == 0 {
-				mode = 0755
-			}
-			if err := os.MkdirAll(dstPath, mode); err != nil {
-				fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", err)
-			}
-			continue
+		cp := *re.entry
+		cp.Depth = re.depthOffset
+		subM.AddEntry(&cp)
+	}
+	subM.SortEntries()
+
+	// Use reconcile to materialize the manifest to the directory.
+	// The store implements reconcile.ContentSource (Has + Open).
+	r := reconcile.New(reconcile.WithSource(store))
+	plan, err := r.Plan(subM, dst)
+	if err != nil {
+		die("cp: reconcile plan: %v", err)
+	}
+	if !plan.IsComplete() {
+		// Report missing content but continue with what we have.
+		for _, mid := range plan.Missing {
+			fmt.Fprintf(os.Stderr, "c4sh: cp: missing content %s\n", mid)
 		}
-		extractEntry(store, re.entry, dstPath)
+		die("cp: %d objects missing from store", len(plan.Missing))
 	}
 
-	// Set directory timestamps in reverse order (deepest first)
-	for i := len(entries) - 1; i >= 0; i-- {
-		re := entries[i]
-		if !re.entry.IsDir() {
-			continue
-		}
-		if re.entry.Timestamp.Equal(c4m.NullTimestamp()) {
-			continue
-		}
-		dstPath := filepath.Join(dst, re.relPath)
-		os.Chtimes(dstPath, re.entry.Timestamp, re.entry.Timestamp)
+	result, err := r.Apply(plan, dst)
+	if err != nil {
+		die("cp: reconcile apply: %v", err)
+	}
+	for _, e := range result.Errors {
+		fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", e)
 	}
 }
 
@@ -281,7 +261,7 @@ func cpC4mToC4m(src, dst string) {
 	// Calculate destination base depth
 	dstBaseDepth := 0
 	if dstSub != "" {
-		dstBaseDepth = strings.Count(dstSub, "/") + 1
+		dstBaseDepth = strings.Count(strings.TrimSuffix(dstSub, "/"), "/") + 1
 		ensureParentDirs(dstM, dstSub)
 	}
 
@@ -298,16 +278,9 @@ func cpC4mToC4m(src, dst string) {
 	}
 }
 
-// multiC4mDest tracks state for a c4m destination during multi-dest copy.
-type multiC4mDest struct {
-	c4mFile   string
-	baseDepth int
-	manifest  *c4m.Manifest
-}
-
 // cpMultiDest copies a real source directory to multiple destinations
-// simultaneously. Each source file is read once and written to all
-// destinations via io.MultiWriter — one read fans out to N writes.
+// simultaneously using reconcile.Distribute. Each source file is read
+// once and fanned out to all targets in a single pass.
 func cpMultiDest(src string, dests []string) {
 	src = expandHome(src)
 	info, err := os.Stat(src)
@@ -318,253 +291,75 @@ func cpMultiDest(src string, dests []string) {
 		die("cp: multi-dest requires a directory source")
 	}
 
-	// Classify destinations.
-	var realDests []string
-	var c4mDests []multiC4mDest
+	// Classify destinations and build reconcile targets.
+	type c4mDest struct {
+		c4mFile string
+	}
+	var targets []reconcile.Target
+	var c4mDests []c4mDest // parallel to targets, only for c4m entries
+
 	for _, d := range dests {
 		if !isC4mPath(d) {
-			realDests = append(realDests, expandHome(d))
+			targets = append(targets, reconcile.ToDir(expandHome(d)))
+			c4mDests = append(c4mDests, c4mDest{})
 			continue
 		}
-		c4mFile, sub := splitC4mPath(d)
-		m, _ := loadManifest(c4mFile)
-		if m == nil {
-			m = c4m.NewManifest()
-		}
-		baseDepth := 0
-		if sub != "" {
-			baseDepth = strings.Count(sub, "/") + 1
-			ensureParentDirs(m, sub)
-		}
-		c4mDests = append(c4mDests, multiC4mDest{
-			c4mFile:   c4mFile,
-			baseDepth: baseDepth,
-			manifest:  m,
-		})
-	}
-
-	hasC4m := len(c4mDests) > 0
-
-	// Open store if any c4m destination exists.
-	var store c4store.Store
-	if hasC4m {
-		store, err = openStore()
-		if err != nil {
-			die("cp: store: %v", err)
+		c4mFile, _ := splitC4mPath(d)
+		store, sErr := openStore()
+		if sErr != nil {
+			die("cp: store: %v", sErr)
 		}
 		if store == nil {
 			die("cp: no content store configured (set C4_STORE or run c4 init)")
 		}
+		targets = append(targets, reconcile.ToStore(store))
+		c4mDests = append(c4mDests, c4mDest{c4mFile: c4mFile})
 	}
 
-	// Create real destination roots.
-	for _, rd := range realDests {
-		if mkErr := os.MkdirAll(rd, 0755); mkErr != nil {
-			die("cp: %v", mkErr)
+	result, err := reconcile.Distribute(src, targets...)
+	if err != nil {
+		die("cp: %v", err)
+	}
+
+	// Report per-target errors.
+	for _, tr := range result.Targets {
+		for _, e := range tr.Errors {
+			fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", tr.Target, e)
 		}
 	}
 
-	// Track directories for timestamp fixup.
-	type dirRecord struct {
-		relPath   string
-		timestamp time.Time
-	}
-	var dirs []dirRecord
-
-	// Walk source tree.
-	srcBase := src
-	walkErr := filepath.Walk(srcBase, func(p string, fi os.FileInfo, wErr error) error {
-		if wErr != nil {
-			fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", wErr)
-			return nil
+	// Save manifest for each c4m destination.
+	for i, cd := range c4mDests {
+		if cd.c4mFile == "" {
+			continue
 		}
-		rel, _ := filepath.Rel(srcBase, p)
-		if rel == "." {
-			return nil
+		_, sub := splitC4mPath(dests[i])
+
+		// If the c4m destination has a subpath, wrap the manifest entries.
+		m := result.Manifest
+		if sub != "" {
+			m = wrapManifestInSubpath(m, sub)
 		}
 
-		parts := strings.Split(rel, string(filepath.Separator))
-		name := fi.Name()
-
-		if fi.IsDir() {
-			mode := fi.Mode().Perm()
-			if mode == 0 {
-				mode = 0755
-			}
-			for _, rd := range realDests {
-				if mkErr := os.MkdirAll(filepath.Join(rd, rel), mode); mkErr != nil {
-					fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", mkErr)
-				}
-			}
-			dirs = append(dirs, dirRecord{relPath: rel, timestamp: fi.ModTime().UTC()})
-			depth := len(parts) - 1
-			for i := range c4mDests {
-				c4mDests[i].manifest.AddEntry(&c4m.Entry{
-					Name:      name + "/",
-					Depth:     c4mDests[i].baseDepth + depth,
-					Mode:      fi.Mode() | os.ModeDir,
-					Size:      -1,
-					Timestamp: fi.ModTime().UTC(),
-				})
-			}
-			return nil
-		}
-
-		if !fi.Mode().IsRegular() {
-			return nil
-		}
-
-		id := multiDestCopyFile(p, rel, fi, realDests, store, hasC4m)
-		if id.IsNil() && !hasC4m {
-			return nil // real-only copy succeeded, no ID needed
-		}
-
-		depth := len(parts) - 1
-		for i := range c4mDests {
-			c4mDests[i].manifest.AddEntry(&c4m.Entry{
-				Name:      name,
-				Depth:     c4mDests[i].baseDepth + depth,
-				Mode:      fi.Mode(),
-				Size:      fi.Size(),
-				Timestamp: fi.ModTime().UTC(),
-				C4ID:      id,
-			})
-		}
-		return nil
-	})
-	if walkErr != nil {
-		die("cp: walk: %v", walkErr)
-	}
-
-	// Save all c4m manifests.
-	for _, cd := range c4mDests {
-		cd.manifest.SortEntries()
-		if sErr := saveManifest(cd.c4mFile, cd.manifest); sErr != nil {
+		if sErr := saveManifest(cd.c4mFile, m); sErr != nil {
 			fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", sErr)
 		}
 	}
-
-	// Set directory timestamps on real destinations (deepest first).
-	for i := len(dirs) - 1; i >= 0; i-- {
-		d := dirs[i]
-		for _, rd := range realDests {
-			dstPath := filepath.Join(rd, d.relPath)
-			os.Chtimes(dstPath, d.timestamp, d.timestamp)
-		}
-	}
 }
 
-// multiDestCopyFile reads a single source file and writes it simultaneously
-// to all real destinations and (if hasC4m) to a store temp file. Returns
-// the computed C4 ID. On error the ID may be nil.
-func multiDestCopyFile(srcPath, rel string, fi os.FileInfo, realDests []string, store c4store.Store, hasC4m bool) c4.ID {
-	sf, err := os.Open(srcPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", rel, err)
-		return c4.ID{}
+// wrapManifestInSubpath creates a new manifest with all entries shifted
+// under the given subpath. Parent directories are created as needed.
+func wrapManifestInSubpath(m *c4m.Manifest, sub string) *c4m.Manifest {
+	wrapped := c4m.NewManifest()
+	baseDepth := strings.Count(strings.TrimSuffix(sub, "/"), "/") + 1
+	ensureParentDirs(wrapped, sub)
+	for _, e := range m.Entries {
+		cp := *e
+		cp.Depth = baseDepth + e.Depth
+		wrapped.AddEntry(&cp)
 	}
-	defer sf.Close()
-
-	hasher := sha512.New()
-	writers := []io.Writer{hasher}
-	var realFiles []*os.File
-
-	for _, rd := range realDests {
-		dstPath := filepath.Join(rd, rel)
-		if mkErr := os.MkdirAll(filepath.Dir(dstPath), 0755); mkErr != nil {
-			fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", mkErr)
-			continue
-		}
-		rf, cErr := os.Create(dstPath)
-		if cErr != nil {
-			fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", cErr)
-			continue
-		}
-		writers = append(writers, rf)
-		realFiles = append(realFiles, rf)
-	}
-
-	var tmp *os.File
-	if hasC4m && store != nil {
-		tmp, err = os.CreateTemp(os.TempDir(), ".ingest.*")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "c4sh: cp: temp: %v\n", err)
-			closeFiles(realFiles)
-			return c4.ID{}
-		}
-		writers = append(writers, tmp)
-	}
-
-	multi := io.MultiWriter(writers...)
-	if _, cpErr := io.Copy(multi, sf); cpErr != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", rel, cpErr)
-		closeFiles(realFiles)
-		if tmp != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
-		}
-		return c4.ID{}
-	}
-
-	closeFiles(realFiles)
-
-	// Set metadata on real destination files.
-	for _, rd := range realDests {
-		dstPath := filepath.Join(rd, rel)
-		mode := fi.Mode().Perm()
-		if mode != 0 {
-			os.Chmod(dstPath, mode)
-		}
-		os.Chtimes(dstPath, fi.ModTime(), fi.ModTime())
-	}
-
-	// Compute C4 ID.
-	var id c4.ID
-	copy(id[:], hasher.Sum(nil))
-
-	// Finalize store content.
-	if tmp != nil {
-		if sErr := tmp.Sync(); sErr != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
-			fmt.Fprintf(os.Stderr, "c4sh: cp: %s: store sync: %v\n", rel, sErr)
-			return id
-		}
-		tmpName := tmp.Name()
-		tmp.Close()
-
-		if store.Has(id) {
-			os.Remove(tmpName)
-		} else {
-			// Pipe temp through store.Put for correct trie placement.
-			if pErr := storeTempFile(store, tmpName); pErr != nil {
-				fmt.Fprintf(os.Stderr, "c4sh: cp: %s: store: %v\n", rel, pErr)
-			}
-		}
-	}
-
-	return id
-}
-
-// storeTempFile opens a temp file and stores its content via store.Put,
-// then removes the temp file.
-func storeTempFile(store c4store.Store, tmpPath string) error {
-	f, err := os.Open(tmpPath)
-	if err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	defer f.Close()
-	defer os.Remove(tmpPath)
-	_, err = store.Put(f)
-	return err
-}
-
-// closeFiles closes a slice of open files, ignoring errors.
-func closeFiles(files []*os.File) {
-	for _, f := range files {
-		f.Close()
-	}
+	wrapped.SortEntries()
+	return wrapped
 }
 
 // --------------------------------------------------------------------------
@@ -599,10 +394,10 @@ func entriesForSubtree(m *c4m.Manifest, srcSub string) []resolvedEntry {
 	}
 
 	// Find the target entry by full path
-	target, targetIdx := findEntryByPath(m, srcSub)
+	target := m.GetEntry(srcSub)
 	if target == nil {
 		// Try with trailing slash for directories
-		target, targetIdx = findEntryByPath(m, srcSub+"/")
+		target = m.GetEntry(srcSub + "/")
 	}
 	if target == nil {
 		return nil
@@ -617,37 +412,22 @@ func entriesForSubtree(m *c4m.Manifest, srcSub string) []resolvedEntry {
 		}}
 	}
 
-	// Directory — collect it and all descendants
-	var result []resolvedEntry
-	baseDepth := target.Depth
-
-	// Don't include the directory entry itself — include its children
+	// Directory — collect all descendants (not the directory itself)
 	// so that "cp project.c4m:shots/ out.c4m:" copies shots' contents
-	for i := targetIdx + 1; i < len(m.Entries); i++ {
-		e := m.Entries[i]
-		if e.Depth <= baseDepth {
-			break // left the subtree
-		}
+	targetPath := strings.TrimSuffix(m.EntryPath(target), "/")
+	baseDepth := target.Depth
+	var result []resolvedEntry
+	for _, e := range m.Descendants(target) {
 		depthOff := e.Depth - baseDepth - 1
-		relPath := reconstructRelPath(m, e, targetIdx)
+		full := entryFullPath(m, e)
+		rel := strings.TrimPrefix(full, targetPath+"/")
 		result = append(result, resolvedEntry{
 			entry:       e,
-			relPath:     relPath,
+			relPath:     rel,
 			depthOffset: depthOff,
 		})
 	}
 	return result
-}
-
-// reconstructRelPath builds the path of entry e relative to the directory
-// at parentIdx in the manifest's entry list.
-func reconstructRelPath(m *c4m.Manifest, e *c4m.Entry, parentIdx int) string {
-	full := entryFullPath(m, e)
-	parentFull := entryFullPath(m, m.Entries[parentIdx])
-	parentFull = strings.TrimSuffix(parentFull, "/")
-	rel := strings.TrimPrefix(full, parentFull+"/")
-	// Strip trailing slash for directory names in paths
-	return strings.TrimSuffix(rel, "/")
 }
 
 // storeFile reads a file, stores its content, and returns the C4 ID.
@@ -664,42 +444,48 @@ func storeFile(store interface{ Put(io.Reader) (c4.ID, error) }, path string) (c
 func extractEntry(store interface {
 	Open(c4.ID) (io.ReadCloser, error)
 }, e *c4m.Entry, dstPath string) {
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+	if err := doExtractEntry(store, e, dstPath); err != nil {
 		fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", err)
-		return
+	}
+}
+
+// doExtractEntry extracts a single file entry from the store to disk.
+// Returns an error instead of printing to stderr.
+func doExtractEntry(store interface {
+	Open(c4.ID) (io.ReadCloser, error)
+}, e *c4m.Entry, dstPath string) error {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return err
 	}
 
 	if e.C4ID.IsNil() {
 		// Empty file — create it with correct mode
 		f, err := os.Create(dstPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", err)
-			return
+			return err
 		}
 		f.Close()
 		setFileMetadata(dstPath, e)
-		return
+		return nil
 	}
 
 	rc, err := store.Open(e.C4ID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cp: content not found for %s (%s)\n", e.Name, e.C4ID)
-		return
+		return fmt.Errorf("content not found for %s (%s)", e.Name, e.C4ID)
 	}
 	defer rc.Close()
 
 	out, err := os.Create(dstPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", err)
-		return
+		return err
 	}
 	if _, err := io.Copy(out, rc); err != nil {
 		out.Close()
-		fmt.Fprintf(os.Stderr, "c4sh: cp: write %s: %v\n", dstPath, err)
-		return
+		return fmt.Errorf("write %s: %v", dstPath, err)
 	}
 	out.Close()
 	setFileMetadata(dstPath, e)
+	return nil
 }
 
 // setFileMetadata applies mode and timestamp from a c4m entry to a real file.
@@ -719,8 +505,7 @@ func ensureParentDirs(m *c4m.Manifest, subPath string) {
 	parts := strings.Split(strings.TrimSuffix(subPath, "/"), "/")
 	for i := range parts {
 		partial := strings.Join(parts[:i+1], "/") + "/"
-		existing, _ := findEntryByPath(m, partial)
-		if existing != nil {
+		if m.GetEntry(partial) != nil {
 			continue
 		}
 		m.AddEntry(&c4m.Entry{

@@ -28,7 +28,7 @@ func runMkdir(args []string) {
 
 	if len(paths) == 0 {
 		fmt.Fprintf(os.Stderr, "Usage: c4sh mkdir [-p] <dir>...\n")
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Resolve first path to determine c4m file
@@ -89,15 +89,14 @@ func runMkdir(args []string) {
 	}
 
 	if errs > 0 {
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
 // mkdirOne creates a single directory entry. Returns true if the manifest was modified.
 func mkdirOne(m *c4m.Manifest, dirPath string, errs *int) bool {
 	// Check if it already exists
-	existing, _ := findEntryByPath(m, dirPath+"/")
-	if existing != nil {
+	if m.GetEntry(dirPath+"/") != nil {
 		fmt.Fprintf(os.Stderr, "c4sh: mkdir: %s: already exists\n", dirPath)
 		*errs++
 		return false
@@ -107,7 +106,7 @@ func mkdirOne(m *c4m.Manifest, dirPath string, errs *int) bool {
 	parent, name := splitDirName(dirPath)
 	depth := 0
 	if parent != "" {
-		parentEntry, _ := findEntryByPath(m, parent+"/")
+		parentEntry := m.GetEntry(parent + "/")
 		if parentEntry == nil {
 			fmt.Fprintf(os.Stderr, "c4sh: mkdir: %s: parent directory does not exist\n", dirPath)
 			*errs++
@@ -136,8 +135,7 @@ func mkdirAll(m *c4m.Manifest, dirPath string) bool {
 
 	for i := range parts {
 		partial := strings.Join(parts[:i+1], "/")
-		existing, _ := findEntryByPath(m, partial+"/")
-		if existing != nil {
+		if m.GetEntry(partial+"/") != nil {
 			continue
 		}
 
@@ -145,7 +143,7 @@ func mkdirAll(m *c4m.Manifest, dirPath string) bool {
 		depth := 0
 		if i > 0 {
 			parentPath := strings.Join(parts[:i], "/")
-			parentEntry, _ := findEntryByPath(m, parentPath+"/")
+			parentEntry := m.GetEntry(parentPath + "/")
 			if parentEntry != nil {
 				depth = parentEntry.Depth + 1
 			}

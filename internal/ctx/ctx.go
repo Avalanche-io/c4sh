@@ -36,7 +36,8 @@ func (c *Context) C4mName() string {
 }
 
 // Resolve resolves a relative path against the current CWD within the c4m.
-// Returns the normalized subpath (no leading slash).
+// Returns the normalized subpath (no leading slash). Paths that traverse
+// above the c4m root are clamped to root (empty string).
 func (c *Context) Resolve(p string) string {
 	if p == "" || p == "." {
 		return c.CWD
@@ -48,7 +49,7 @@ func (c *Context) Resolve(p string) string {
 		resolved = path.Clean(path.Join(c.CWD, p))
 	}
 	resolved = strings.TrimPrefix(resolved, "/")
-	if resolved == "." {
+	if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") {
 		return ""
 	}
 	return resolved
