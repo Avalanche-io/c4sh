@@ -523,6 +523,7 @@ func TestRunShellInit_Bash(t *testing.T) {
 
 func TestRunShellInit_Unsupported(t *testing.T) {
 	t.Setenv("SHELL", "/bin/fish")
+	t.Setenv("PSModulePath", "") // Prevent PowerShell detection on CI runners
 	withTestExit(t)
 
 	code := catchExit(func() { runShellInit(nil) })
