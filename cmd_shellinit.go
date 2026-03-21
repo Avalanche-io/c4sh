@@ -151,10 +151,14 @@ __c4sh_prompt() {
         local name
         name=$(basename "$C4_CONTEXT" .c4m)
         local cwd="${C4_CWD:+/$C4_CWD}"
-        PS1="${__c4sh_original_ps1/\\$ / c4 ${name}:${cwd} \\$ }"
-        if [ "$PS1" = "$__c4sh_original_ps1" ]; then
-            PS1="c4 ${name}:${cwd} ${__c4sh_original_ps1}"
+        local marker=" c4 ${name}:${cwd}"
+        # Insert before " $ " at the end of the prompt (right side, before dollar)
+        local new_ps1="${__c4sh_original_ps1/\$ /${marker} \$ }"
+        if [ "$new_ps1" = "$__c4sh_original_ps1" ]; then
+            # Fallback: append before the prompt entirely
+            new_ps1="${__c4sh_original_ps1}${marker} "
         fi
+        PS1="$new_ps1"
     else
         PS1="$__c4sh_original_ps1"
     fi
