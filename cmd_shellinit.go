@@ -143,30 +143,22 @@ function pvd {
 `
 
 const bashScript = sharedScript + `
-# Prompt: show c4m context inline
-__c4sh_original_ps1="${__c4sh_original_ps1:-$PS1}"
-
-__c4sh_prompt() {
+# Prompt helper: outputs c4m context string when active, empty otherwise.
+# Add $(__c4sh_context) to your PS1 wherever you want it to appear.
+#
+# Example:
+#   PS1='\u@\h \w$(__c4sh_context) $ '
+#   # Output when in c4m: joshua@Abyss /tmp/test c4 project:/src/ $
+#   # Output normally:    joshua@Abyss /tmp/test $
+#
+__c4sh_context() {
     if [ -n "$C4_CONTEXT" ]; then
         local name
         name=$(basename "$C4_CONTEXT" .c4m)
         local cwd="${C4_CWD:+/$C4_CWD}"
-        local marker=" c4 ${name}:${cwd}"
-        # Insert before " $ " at the end of the prompt (right side, before dollar)
-        local new_ps1="${__c4sh_original_ps1/\$ /${marker} \$ }"
-        if [ "$new_ps1" = "$__c4sh_original_ps1" ]; then
-            # Fallback: append before the prompt entirely
-            new_ps1="${__c4sh_original_ps1}${marker} "
-        fi
-        PS1="$new_ps1"
-    else
-        PS1="$__c4sh_original_ps1"
+        printf ' c4 %s:%s' "$name" "${cwd:-/}"
     fi
 }
-
-if [[ ! "${PROMPT_COMMAND:-}" =~ __c4sh_prompt ]]; then
-    PROMPT_COMMAND="__c4sh_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
-fi
 
 # Tab completion for bash.
 __c4sh_complete() {
@@ -188,25 +180,11 @@ complete -o default -F __c4sh_complete ls cat cp mv rm mkdir cd
 `
 
 const zshScript = sharedScript + `
-# Prompt: show c4m context inline
-__c4sh_original_ps1="${__c4sh_original_ps1:-$PROMPT}"
-
-__c4sh_prompt() {
-    if [ -n "$C4_CONTEXT" ]; then
-        local name
-        name=$(basename "$C4_CONTEXT" .c4m)
-        local cwd="${C4_CWD:+/$C4_CWD}"
-        PROMPT="${__c4sh_original_ps1/\%\# / c4 ${name}:${cwd} %# }"
-        if [ "$PROMPT" = "$__c4sh_original_ps1" ]; then
-            PROMPT="c4 ${name}:${cwd} ${__c4sh_original_ps1}"
-        fi
-    else
-        PROMPT="$__c4sh_original_ps1"
-    fi
-}
-
-autoload -Uz add-zsh-hook
-add-zsh-hook precmd __c4sh_prompt
+# Prompt helper (same function defined in shared script).
+# Add $(__c4sh_context) to your PROMPT wherever you want it.
+#
+# Example:
+#   PROMPT='%n@%m %~ $(__c4sh_context) %# '
 
 # Tab completion for zsh.
 __c4sh_complete() {

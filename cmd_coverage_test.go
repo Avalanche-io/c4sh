@@ -1059,7 +1059,7 @@ func TestShellInitScript_Bash(t *testing.T) {
 		t.Fatal("bash script should not be empty")
 	}
 	// Verify it contains expected function names
-	for _, fn := range []string{"function cd", "function ls", "function cat", "__c4sh_prompt", "__c4sh_complete"} {
+	for _, fn := range []string{"function cd", "function ls", "function cat", "__c4sh_context", "__c4sh_complete"} {
 		if !strings.Contains(script, fn) {
 			t.Errorf("bash script missing %q", fn)
 		}
@@ -1074,7 +1074,7 @@ func TestShellInitScript_Zsh(t *testing.T) {
 	if script == "" {
 		t.Fatal("zsh script should not be empty")
 	}
-	for _, fn := range []string{"function cd", "function ls", "__c4sh_prompt", "__c4sh_complete", "compdef"} {
+	for _, fn := range []string{"function cd", "function ls", "__c4sh_context", "__c4sh_complete", "compdef"} {
 		if !strings.Contains(script, fn) {
 			t.Errorf("zsh script missing %q", fn)
 		}
