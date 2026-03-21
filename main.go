@@ -166,8 +166,8 @@ func resolveInContext(p string, cur *ctx.Context) string {
 	if strings.Contains(p, ":") || strings.HasSuffix(p, ".c4m") {
 		return p
 	}
-	// Absolute path — refers to real filesystem
-	if strings.HasPrefix(p, "/") {
+	// Absolute path or home-relative — refers to real filesystem
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~/") {
 		return p
 	}
 	// "." or "" means c4m context root
