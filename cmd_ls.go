@@ -19,9 +19,13 @@ import (
 // c4m text. Otherwise execs real ls.
 func runLs(args []string) {
 	// Parse flags and collect paths
-	var longFormat, showAll, onePerLine bool
+	var longFormat, showAll, onePerLine, showIDs bool
 	var paths []string
 	for _, arg := range args {
+		if arg == "--id" || arg == "--ids" {
+			showIDs = true
+			continue
+		}
 		if strings.HasPrefix(arg, "--") {
 			continue // skip long options like --color=auto
 		}
@@ -34,6 +38,8 @@ func runLs(args []string) {
 					showAll = true
 				case '1':
 					onePerLine = true
+				case 'i':
+					showIDs = true
 				}
 			}
 			continue
@@ -53,7 +59,7 @@ func runLs(args []string) {
 				osExit(1)
 			}
 			entries := entriesAtPath(m, cur.CWD)
-			printEntries(entries, longFormat, showAll, onePerLine)
+			printEntries(entries, longFormat, showAll, onePerLine, showIDs)
 			return
 		}
 		// Not in context: fallthrough to real ls
@@ -72,7 +78,7 @@ func runLs(args []string) {
 				fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
 				osExit(1)
 			}
-			listPath(m, subPath, longFormat, showAll, onePerLine)
+			listPath(m, subPath, longFormat, showAll, onePerLine, showIDs)
 			continue
 		}
 
@@ -85,7 +91,7 @@ func runLs(args []string) {
 				osExit(1)
 			}
 			entries := m.Root()
-			printEntries(entries, longFormat, showAll, onePerLine)
+			printEntries(entries, longFormat, showAll, onePerLine, showIDs)
 			continue
 		}
 
@@ -98,7 +104,7 @@ func runLs(args []string) {
 				osExit(1)
 			}
 			entries := m.Root()
-			printEntries(entries, longFormat, showAll, onePerLine)
+			printEntries(entries, longFormat, showAll, onePerLine, showIDs)
 			continue
 		}
 
@@ -110,7 +116,7 @@ func runLs(args []string) {
 				osExit(1)
 			}
 			resolved := cur.Resolve(p)
-			listPath(m, resolved, longFormat, showAll, onePerLine)
+			listPath(m, resolved, longFormat, showAll, onePerLine, showIDs)
 			continue
 		}
 
@@ -123,8 +129,8 @@ func runLs(args []string) {
 // listPath lists entries at a given path within a manifest.
 // If the path points to a file, shows that single entry.
 // If the path points to a directory, shows its children.
-func listPath(m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) {
-	if err := listPathTo(os.Stdout, m, subPath, long, showAll, onePerLine); err != nil {
+func listPath(m *c4m.Manifest, subPath string, long, showAll, onePerLine, showIDs bool) {
+	if err := listPathTo(os.Stdout, m, subPath, long, showAll, onePerLine, showIDs); err != nil {
 		fmt.Fprintf(os.Stderr, "c4sh: ls: %v\n", err)
 		osExit(1)
 	}
@@ -132,9 +138,9 @@ func listPath(m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) {
 
 // listPathTo lists entries at a given path within a manifest, writing to w.
 // Returns an error instead of calling os.Exit.
-func listPathTo(w io.Writer, m *c4m.Manifest, subPath string, long, showAll, onePerLine bool) error {
+func listPathTo(w io.Writer, m *c4m.Manifest, subPath string, long, showAll, onePerLine, showIDs bool) error {
 	if subPath == "" {
-		printEntriesTo(w, m.Root(), long, showAll, onePerLine, false)
+		printEntriesTo(w, m.Root(), long, showAll, onePerLine, false, showIDs)
 		return nil
 	}
 
@@ -146,7 +152,7 @@ func listPathTo(w io.Writer, m *c4m.Manifest, subPath string, long, showAll, one
 	dirEntry := findEntry(m, dirPath)
 	if dirEntry != nil && dirEntry.IsDir() {
 		entries := m.Children(dirEntry)
-		printEntriesTo(w, entries, long, showAll, onePerLine, false)
+		printEntriesTo(w, entries, long, showAll, onePerLine, false, showIDs)
 		return nil
 	}
 
@@ -155,7 +161,7 @@ func listPathTo(w io.Writer, m *c4m.Manifest, subPath string, long, showAll, one
 	fileEntry := findEntry(m, filePath)
 	if fileEntry != nil && !fileEntry.IsDir() {
 		if long {
-			printLongEntryTo(w, fileEntry)
+			printLongEntryTo(w, fileEntry, showIDs)
 		} else {
 			fmt.Fprintln(w, fileEntry.Name)
 		}
@@ -166,18 +172,18 @@ func listPathTo(w io.Writer, m *c4m.Manifest, subPath string, long, showAll, one
 }
 
 // printEntries outputs a list of entries with the appropriate format.
-func printEntries(entries []*c4m.Entry, long, showAll, onePerLine bool) {
-	printEntriesTo(os.Stdout, entries, long, showAll, onePerLine, isTerminal())
+func printEntries(entries []*c4m.Entry, long, showAll, onePerLine, showIDs bool) {
+	printEntriesTo(os.Stdout, entries, long, showAll, onePerLine, isTerminal(), showIDs)
 }
 
 // printEntriesTo outputs a list of entries with the appropriate format to w.
-func printEntriesTo(w io.Writer, entries []*c4m.Entry, long, showAll, onePerLine, isTTY bool) {
+func printEntriesTo(w io.Writer, entries []*c4m.Entry, long, showAll, onePerLine, isTTY, showIDs bool) {
 	for _, e := range entries {
 		if !showAll && strings.HasPrefix(e.Name, ".") {
 			continue
 		}
 		if long {
-			printLongEntryTo(w, e)
+			printLongEntryTo(w, e, showIDs)
 		} else if onePerLine {
 			fmt.Fprintln(w, e.Name)
 		} else if !isTTY {
@@ -199,14 +205,14 @@ func printEntriesTo(w io.Writer, entries []*c4m.Entry, long, showAll, onePerLine
 	}
 }
 
-// printLongEntry prints a single entry in long format matching c4m entry format:
-// mode timestamp size name [-> target] c4id
-func printLongEntry(e *c4m.Entry) {
-	printLongEntryTo(os.Stdout, e)
+// printLongEntry prints a single entry in long format.
+// C4 IDs are only shown when showIDs is true (via -i or --id flag).
+func printLongEntry(e *c4m.Entry, showIDs bool) {
+	printLongEntryTo(os.Stdout, e, showIDs)
 }
 
 // printLongEntryTo prints a single entry in long format to w.
-func printLongEntryTo(w io.Writer, e *c4m.Entry) {
+func printLongEntryTo(w io.Writer, e *c4m.Entry, showIDs bool) {
 	// Mode
 	mode := e.Mode.String()
 	if len(mode) > 10 {
@@ -236,13 +242,15 @@ func printLongEntryTo(w io.Writer, e *c4m.Entry) {
 		name = name + " -> " + e.Target
 	}
 
-	// C4 ID
-	c4id := "-"
-	if !e.C4ID.IsNil() {
-		c4id = e.C4ID.String()
+	if showIDs {
+		c4id := "-"
+		if !e.C4ID.IsNil() {
+			c4id = e.C4ID.String()
+		}
+		fmt.Fprintf(w, "%s  %8s %s %s %s\n", mode, size, ts, name, c4id)
+	} else {
+		fmt.Fprintf(w, "%s  %8s %s %s\n", mode, size, ts, name)
 	}
-
-	fmt.Fprintf(w, "%s  %8s %s %s %s\n", mode, size, ts, name, c4id)
 }
 
 // isTerminal returns true if stdout is a terminal.

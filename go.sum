@@ -1,5 +1,5 @@
-github.com/Avalanche-io/c4 v1.0.4 h1:KkoEoQCFF9VFzYTvGxRCWwRtVS5pLTVgOlCQ1c5M3Lg=
-github.com/Avalanche-io/c4 v1.0.4/go.mod h1:7RFR0t44NDhJUJr4CIUqWpivYsvu0X3UVxs+BWpXN54=
+github.com/Avalanche-io/c4 v1.0.5 h1:1/y2IRjjrIhgv4yA4veqQPgZdAl2pzEG3C7uDTCcI0Y=
+github.com/Avalanche-io/c4 v1.0.5/go.mod h1:7RFR0t44NDhJUJr4CIUqWpivYsvu0X3UVxs+BWpXN54=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=

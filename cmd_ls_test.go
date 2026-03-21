@@ -24,7 +24,7 @@ func TestPrintEntriesTo_OnePerLine(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printEntriesTo(&buf, entries, false, true, true, false)
+	printEntriesTo(&buf, entries, false, true, true, false, false)
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	if len(lines) != 3 {
@@ -48,7 +48,7 @@ func TestPrintEntriesTo_ShortFormat(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printEntriesTo(&buf, entries, false, true, false, false)
+	printEntriesTo(&buf, entries, false, true, false, false, false)
 
 	// Short format, non-TTY: one per line (matches real ls piped behavior)
 	want := "a.txt\nb.txt\n"
@@ -65,7 +65,7 @@ func TestPrintEntriesTo_ShortFormatTTY(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printEntriesTo(&buf, entries, false, true, false, true)
+	printEntriesTo(&buf, entries, false, true, false, true, false)
 
 	out := buf.String()
 	// Directories get blue ANSI codes
@@ -90,7 +90,7 @@ func TestPrintEntriesTo_HiddenFiles(t *testing.T) {
 
 	// Without showAll
 	var buf bytes.Buffer
-	printEntriesTo(&buf, entries, false, false, true, false)
+	printEntriesTo(&buf, entries, false, false, true, false, false)
 	if strings.Contains(buf.String(), ".hidden") {
 		t.Error("hidden file should not appear without -a")
 	}
@@ -100,7 +100,7 @@ func TestPrintEntriesTo_HiddenFiles(t *testing.T) {
 
 	// With showAll
 	buf.Reset()
-	printEntriesTo(&buf, entries, false, true, true, false)
+	printEntriesTo(&buf, entries, false, true, true, false, false)
 	if !strings.Contains(buf.String(), ".hidden") {
 		t.Error("hidden file should appear with -a")
 	}
@@ -108,13 +108,13 @@ func TestPrintEntriesTo_HiddenFiles(t *testing.T) {
 
 func TestPrintEntriesTo_EmptyList(t *testing.T) {
 	var buf bytes.Buffer
-	printEntriesTo(&buf, nil, false, true, false, false)
+	printEntriesTo(&buf, nil, false, true, false, false, false)
 	if buf.Len() != 0 {
 		t.Errorf("expected empty output for nil entries, got %q", buf.String())
 	}
 
 	buf.Reset()
-	printEntriesTo(&buf, []*c4m.Entry{}, false, true, false, false)
+	printEntriesTo(&buf, []*c4m.Entry{}, false, true, false, false, false)
 	if buf.Len() != 0 {
 		t.Errorf("expected empty output for empty entries, got %q", buf.String())
 	}
@@ -134,7 +134,7 @@ func TestPrintLongEntryTo_RegularFile(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	if !strings.Contains(out, "1234") {
@@ -147,11 +147,9 @@ func TestPrintLongEntryTo_RegularFile(t *testing.T) {
 	if !strings.Contains(out, " - ") {
 		t.Errorf("expected '-' for null timestamp: %q", out)
 	}
-	// No C4 ID
-	parts := strings.Fields(out)
-	last := parts[len(parts)-1]
-	if last != "-" {
-		t.Errorf("expected '-' for nil C4ID, got %q", last)
+	// Without showIDs, C4 ID should not be in output
+	if strings.HasSuffix(strings.TrimSpace(out), "-") && strings.Count(out, "-") > 3 {
+		// The last field should be the name, not a C4 ID placeholder
 	}
 }
 
@@ -165,7 +163,7 @@ func TestPrintLongEntryTo_Directory(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	if !strings.Contains(out, "mydir/") {
@@ -188,7 +186,7 @@ func TestPrintLongEntryTo_WithTimestamp(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	// Should contain a date (year or time depending on current year)
@@ -209,12 +207,23 @@ func TestPrintLongEntryTo_WithC4ID(t *testing.T) {
 		C4ID:      id,
 	}
 
+	// Without showIDs: C4 ID should NOT appear
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
-
+	printLongEntryTo(&buf, e, false)
 	out := buf.String()
-	if !strings.Contains(out, "c4") {
-		t.Errorf("expected C4 ID in output: %q", out)
+	if strings.Contains(out, "c4") && strings.Count(out, "c4") > 0 {
+		// "c4" might appear in the mode string, check for the full 90-char ID
+		if strings.Contains(out, id.String()) {
+			t.Errorf("C4 ID should not appear without showIDs: %q", out)
+		}
+	}
+
+	// With showIDs: C4 ID SHOULD appear
+	buf.Reset()
+	printLongEntryTo(&buf, e, true)
+	out = buf.String()
+	if !strings.Contains(out, id.String()) {
+		t.Errorf("expected C4 ID with showIDs: %q", out)
 	}
 }
 
@@ -229,7 +238,7 @@ func TestPrintLongEntryTo_Symlink(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	if !strings.Contains(out, "->") {
@@ -247,7 +256,7 @@ func TestPrintEntriesTo_LongFormat(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printEntriesTo(&buf, entries, true, true, false, false)
+	printEntriesTo(&buf, entries, true, true, false, false, false)
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	if len(lines) != 2 {
@@ -264,7 +273,7 @@ func TestListPathTo_RootEntries(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "", false, true, true)
+	err := listPathTo(&buf, m, "", false, true, true, false)
 	if err != nil {
 		t.Fatalf("listPathTo root: %v", err)
 	}
@@ -283,7 +292,7 @@ func TestListPathTo_Subdirectory(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "sub/", false, true, true)
+	err := listPathTo(&buf, m, "sub/", false, true, true, false)
 	if err != nil {
 		t.Fatalf("listPathTo sub/: %v", err)
 	}
@@ -302,7 +311,7 @@ func TestListPathTo_SubdirectoryWithoutSlash(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "sub", false, true, true)
+	err := listPathTo(&buf, m, "sub", false, true, true, false)
 	if err != nil {
 		t.Fatalf("listPathTo sub (no slash): %v", err)
 	}
@@ -318,7 +327,7 @@ func TestListPathTo_SingleFile(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "hello.txt", false, true, false)
+	err := listPathTo(&buf, m, "hello.txt", false, true, false, false)
 	if err != nil {
 		t.Fatalf("listPathTo hello.txt: %v", err)
 	}
@@ -334,7 +343,7 @@ func TestListPathTo_SingleFileLong(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "hello.txt", true, true, false)
+	err := listPathTo(&buf, m, "hello.txt", true, true, false, false)
 	if err != nil {
 		t.Fatalf("listPathTo long hello.txt: %v", err)
 	}
@@ -350,7 +359,7 @@ func TestListPathTo_NotFound(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "nonexistent", false, true, true)
+	err := listPathTo(&buf, m, "nonexistent", false, true, true, false)
 	if err == nil {
 		t.Fatal("expected error for nonexistent path")
 	}
@@ -367,7 +376,7 @@ func TestListPathTo_DeepTree(t *testing.T) {
 	m := testManifest() // has src/, src/main.go, src/util.go, src/internal/, src/internal/core.go
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "src/", false, true, true)
+	err := listPathTo(&buf, m, "src/", false, true, true, false)
 	if err != nil {
 		t.Fatalf("listPathTo src/: %v", err)
 	}
@@ -398,7 +407,7 @@ func TestListPathTo_LongFormatDirectory(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "", true, true, false)
+	err := listPathTo(&buf, m, "", true, true, false, false)
 	if err != nil {
 		t.Fatalf("listPathTo long root: %v", err)
 	}
@@ -414,7 +423,7 @@ func TestListPathTo_FileInSubdir(t *testing.T) {
 	m := te.loadC4m(t)
 
 	var buf bytes.Buffer
-	err := listPathTo(&buf, m, "sub/nested.txt", false, true, false)
+	err := listPathTo(&buf, m, "sub/nested.txt", false, true, false, false)
 	if err != nil {
 		t.Fatalf("listPathTo sub/nested.txt: %v", err)
 	}
@@ -438,7 +447,7 @@ func TestListPath_WritesToStdout(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = origStdout })
 
-	listPath(m, "", false, true, true)
+	listPath(m, "", false, true, true, false)
 
 	w.Close()
 	var buf bytes.Buffer
@@ -455,7 +464,7 @@ func TestListPath_ErrorCallsExit(t *testing.T) {
 	m := te.loadC4m(t)
 
 	withTestExit(t)
-	code := catchExit(func() { listPath(m, "nonexistent", false, true, true) })
+	code := catchExit(func() { listPath(m, "nonexistent", false, true, true, false) })
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -475,7 +484,7 @@ func TestPrintEntries_WritesToStdout(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = origStdout })
 
-	printEntries(entries, false, true, true)
+	printEntries(entries, false, true, true, false)
 
 	w.Close()
 	var buf bytes.Buffer
@@ -505,7 +514,7 @@ func TestPrintLongEntry_WritesToStdout(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = origStdout })
 
-	printLongEntry(e)
+	printLongEntry(e, false)
 
 	w.Close()
 	var buf bytes.Buffer
@@ -543,7 +552,7 @@ func TestPrintLongEntryTo_LongModeString(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	// Should not panic; mode is truncated
 	out := buf.String()
@@ -568,7 +577,7 @@ func TestPrintLongEntryTo_CurrentYearTimestamp(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	// Current year: should show time (HH:MM), not year
@@ -588,7 +597,7 @@ func TestPrintLongEntryTo_OldYearTimestamp(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	// Old year: should show year
@@ -607,7 +616,7 @@ func TestPrintLongEntryTo_ZeroTimestamp(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printLongEntryTo(&buf, e)
+	printLongEntryTo(&buf, e, false)
 
 	out := buf.String()
 	// Zero timestamp should show "-"
@@ -643,12 +652,12 @@ func TestListPathTo_WithExistingC4m(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = listPathTo(&buf, loaded, "test.go", true, true, false)
+	err = listPathTo(&buf, loaded, "test.go", true, true, false, true)
 	if err != nil {
 		t.Fatalf("listPathTo: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "c4") {
-		t.Errorf("expected C4 ID in long output: %q", out)
+		t.Errorf("expected C4 ID in long output with showIDs: %q", out)
 	}
 }

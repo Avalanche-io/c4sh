@@ -1674,7 +1674,7 @@ func TestListPath_Success(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	listPath(m, "", false, true, true)
+	listPath(m, "", false, true, true, false)
 
 	w.Close()
 	os.Stdout = old
@@ -1685,7 +1685,7 @@ func TestListPath_Error(t *testing.T) {
 	m := te.loadC4m(t)
 	withTestExit(t)
 
-	code := catchExit(func() { listPath(m, "nonexistent", false, true, true) })
+	code := catchExit(func() { listPath(m, "nonexistent", false, true, true, false) })
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -1700,7 +1700,7 @@ func TestPrintEntries_Wrapper(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	printEntries(entries, false, true, true)
+	printEntries(entries, false, true, true, false)
 
 	w.Close()
 	os.Stdout = old
@@ -1715,7 +1715,7 @@ func TestPrintLongEntry_Wrapper(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	printLongEntry(e)
+	printLongEntry(e, false)
 
 	w.Close()
 	os.Stdout = old
