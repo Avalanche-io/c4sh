@@ -134,12 +134,11 @@ function mkdir {
     fi
 }
 
-# pvd: print virtual directory — the c4m equivalent of pwd.
-# Only meaningful inside a c4m context. Safe to use in command substitution.
+# pvd: print virtual directory. Always works.
+# In c4m context: full resolvable c4m path (e.g., /path/to/project.c4m:src/)
+# Outside context: real working directory (same as pwd)
 function pvd {
-    if [ -n "$C4_CONTEXT" ]; then
-        command c4sh pvd
-    fi
+    command c4sh pvd
 }
 `
 

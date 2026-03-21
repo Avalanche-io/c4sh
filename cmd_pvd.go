@@ -2,30 +2,33 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
+	"os"
 
 	"github.com/Avalanche-io/c4sh/internal/ctx"
 )
 
 // runPvd implements "c4sh pvd" — print virtual directory.
-// Outputs the current c4m context as a colon path: "name.c4m:path/"
-// When not in a c4m context, outputs nothing.
+//
+// Always works:
+//   - In c4m context: prints the full resolvable c4m path (e.g., /tmp/c4-test/c4.c4m:src/)
+//   - Outside c4m context: prints the real working directory (same as pwd)
 func runPvd() {
 	cur := ctx.Current()
 	if cur == nil {
+		// Not in c4m context — behave like pwd
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "c4sh: pvd: %v\n", err)
+			osExit(1)
+		}
+		fmt.Println(wd)
 		return
 	}
 
-	// Use the basename of the c4m file for portability
-	name := filepath.Base(cur.C4mPath)
-	// Strip .c4m extension for cleaner output
-	name = strings.TrimSuffix(name, ".c4m")
-
-	cwd := cur.CWD
-	if cwd != "" {
-		fmt.Printf("%s:%s\n", name, cwd)
+	// In c4m context — full resolvable path
+	if cur.CWD != "" {
+		fmt.Printf("%s:%s\n", cur.C4mPath, cur.CWD)
 	} else {
-		fmt.Printf("%s:\n", name)
+		fmt.Printf("%s:\n", cur.C4mPath)
 	}
 }
