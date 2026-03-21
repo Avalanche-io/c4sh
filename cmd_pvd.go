@@ -25,10 +25,6 @@ func runPvd() {
 		return
 	}
 
-	// In c4m context — full resolvable path
-	if cur.CWD != "" {
-		fmt.Printf("%s:%s\n", cur.C4mPath, cur.CWD)
-	} else {
-		fmt.Printf("%s:\n", cur.C4mPath)
-	}
+	// In c4m context — full resolvable path with leading /
+	fmt.Printf("%s:/%s\n", cur.C4mPath, cur.CWD)
 }
