@@ -213,14 +213,14 @@ func printLongEntry(e *c4m.Entry, showIDs bool) {
 
 // printLongEntryTo prints a single entry in long format to w.
 //
-// Three modes:
-//   - TTY: human-readable with C4 IDs right-aligned at terminal edge
-//   - Piped + showIDs: canonical c4m entry format (parseable, round-trips)
-//   - Piped, no showIDs: human-readable without C4 IDs
+// showIDs controls whether C4 IDs appear (requires -i flag).
+// When piped with -i: canonical c4m entry format (parseable, round-trips).
+// When TTY with -i: human-readable with C4 IDs right-aligned at terminal edge.
+// Without -i: human-readable, no C4 IDs.
 func printLongEntryTo(w io.Writer, e *c4m.Entry, showIDs bool) {
 	isTTY := isTerminal()
 
-	// When piped with showIDs: canonical c4m entry format
+	// Piped with -i: canonical c4m entry format
 	if !isTTY && showIDs {
 		fmt.Fprintln(w, e.Canonical())
 		return
@@ -257,26 +257,22 @@ func printLongEntryTo(w io.Writer, e *c4m.Entry, showIDs bool) {
 
 	base := fmt.Sprintf("%s  %8s %s %s", mode, size, ts, name)
 
-	// TTY: always show C4 IDs, right-aligned at terminal edge
-	if isTTY {
-		c4id := ""
+	// TTY with -i: right-align C4 IDs at terminal edge
+	if showIDs && isTTY {
+		c4id := "-"
 		if !e.C4ID.IsNil() {
 			c4id = e.C4ID.String()
 		}
-		if c4id != "" {
-			width := terminalWidth()
-			padding := width - len(base) - len(c4id)
-			if padding < 2 {
-				padding = 2
-			}
-			fmt.Fprintf(w, "%s%s%s\n", base, strings.Repeat(" ", padding), c4id)
-		} else {
-			fmt.Fprintln(w, base)
+		width := terminalWidth()
+		padding := width - len(base) - len(c4id)
+		if padding < 2 {
+			padding = 2
 		}
+		fmt.Fprintf(w, "%s%s%s\n", base, strings.Repeat(" ", padding), c4id)
 		return
 	}
 
-	// Piped, no showIDs: clean human format
+	// No -i: no C4 IDs
 	fmt.Fprintln(w, base)
 }
 
