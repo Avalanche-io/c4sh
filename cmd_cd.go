@@ -174,8 +174,11 @@ func navigateWithinCmds(cur *ctx.Context, target string) (string, error) {
 	// Resolve the new path within the c4m
 	newPath := cur.Resolve(target)
 
-	// If resolved to root, just update CWD
+	// If resolved to root: if we were already at root and going up, exit context
 	if newPath == "" {
+		if cur.CWD == "" && (target == ".." || target == "../") {
+			return exitContextCmds(""), nil
+		}
 		var b strings.Builder
 		writeSetEnv(&b, "C4_CWD", "")
 		return b.String(), nil
