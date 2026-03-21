@@ -97,15 +97,15 @@ func catFromC4mTo(w io.Writer, c4mPath, subPath string) error {
 
 	s, err := openStore()
 	if err != nil {
-		return fmt.Errorf("store error: %v", err)
+		return fmt.Errorf("cannot open store: %v\n  The content store holds file data referenced by c4m entries.\n  Set C4_STORE or configure ~/.c4/config.", err)
 	}
 	if s == nil {
-		return fmt.Errorf("no store configured")
+		return fmt.Errorf("no content store configured\n  Set C4_STORE to a store path, or create ~/.c4/config.\n  Use 'cp <dir> <file.c4m>:' to scan and store content.")
 	}
 
 	rc, err := s.Open(e.C4ID)
 	if err != nil {
-		return fmt.Errorf("content not available for %s (%s)", subPath, e.C4ID)
+		return fmt.Errorf("%s: content not in store\n  C4 ID: %s\n  The c4m describes this file but the store does not have its content.\n  Use 'cp <source-dir> <file.c4m>:' to scan with storage.", subPath, e.C4ID)
 	}
 	defer rc.Close()
 

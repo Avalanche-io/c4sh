@@ -357,7 +357,7 @@ func TestCatFromC4mTo_ContentMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing content")
 	}
-	if !strings.Contains(err.Error(), "not available") {
-		t.Errorf("error = %q, want 'not available'", err)
+	if !strings.Contains(err.Error(), "content not in store") {
+		t.Errorf("error = %q, want 'content not in store'", err)
 	}
 }
