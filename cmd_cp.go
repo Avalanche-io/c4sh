@@ -12,6 +12,7 @@ import (
 	"github.com/Avalanche-io/c4/c4m"
 	"github.com/Avalanche-io/c4/reconcile"
 	"github.com/Avalanche-io/c4/scan"
+	"github.com/Avalanche-io/c4sh/internal/ctx"
 )
 
 // runCp implements "c4sh cp" — the universal verb for moving content across
@@ -35,6 +36,14 @@ func runCp(args []string) {
 	if len(filtered) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: c4sh cp <source> <dest...>\n")
 		osExit(1)
+	}
+
+	// When inside a c4m context, resolve bare relative paths as c4m references.
+	cur := ctx.Current()
+	if cur != nil {
+		for i := range filtered {
+			filtered[i] = resolveInContext(filtered[i], cur)
+		}
 	}
 
 	// Multi-destination: 3+ args means first is source, rest are destinations.

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Avalanche-io/c4sh/internal/ctx"
 )
 
 const version = "1.0.5"
@@ -151,4 +153,26 @@ func splitC4mPath(p string) (c4mFile string, subPath string) {
 	}
 	subPath = strings.TrimPrefix(subPath, "/")
 	return
+}
+
+// resolveInContext converts a bare path to a c4m colon path when inside
+// a c4m context. For example, "." becomes "project.c4m:", "src/" becomes
+// "project.c4m:src/". Paths that already contain ":" or ".c4m", or that
+// start with "/" (absolute), are returned unchanged.
+func resolveInContext(p string, cur *ctx.Context) string {
+	// Already explicit c4m syntax
+	if strings.Contains(p, ":") || strings.HasSuffix(p, ".c4m") {
+		return p
+	}
+	// Absolute path — refers to real filesystem
+	if strings.HasPrefix(p, "/") {
+		return p
+	}
+	// "." or "" means c4m context root
+	if p == "." || p == "" {
+		return cur.C4mPath + ":"
+	}
+	// Relative path inside the c4m context
+	resolved := cur.Resolve(p)
+	return cur.C4mPath + ":" + resolved
 }
