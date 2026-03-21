@@ -11,6 +11,7 @@ import (
 	"github.com/Avalanche-io/c4/c4m"
 	"github.com/Avalanche-io/c4sh/internal/ctx"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/term"
 )
 
 // runLs implements "c4sh ls" — c4m-aware ls with fallthrough.
@@ -205,14 +206,26 @@ func printEntriesTo(w io.Writer, entries []*c4m.Entry, long, showAll, onePerLine
 	}
 }
 
-// printLongEntry prints a single entry in long format.
-// C4 IDs are only shown when showIDs is true (via -i or --id flag).
+// printLongEntry prints a single entry in long format to stdout.
 func printLongEntry(e *c4m.Entry, showIDs bool) {
 	printLongEntryTo(os.Stdout, e, showIDs)
 }
 
 // printLongEntryTo prints a single entry in long format to w.
+//
+// Three modes:
+//   - TTY: human-readable with C4 IDs right-aligned at terminal edge
+//   - Piped + showIDs: canonical c4m entry format (parseable, round-trips)
+//   - Piped, no showIDs: human-readable without C4 IDs
 func printLongEntryTo(w io.Writer, e *c4m.Entry, showIDs bool) {
+	isTTY := isTerminal()
+
+	// When piped with showIDs: canonical c4m entry format
+	if !isTTY && showIDs {
+		fmt.Fprintln(w, e.Canonical())
+		return
+	}
+
 	// Mode
 	mode := e.Mode.String()
 	if len(mode) > 10 {
@@ -242,15 +255,38 @@ func printLongEntryTo(w io.Writer, e *c4m.Entry, showIDs bool) {
 		name = name + " -> " + e.Target
 	}
 
-	if showIDs {
-		c4id := "-"
+	base := fmt.Sprintf("%s  %8s %s %s", mode, size, ts, name)
+
+	// TTY: always show C4 IDs, right-aligned at terminal edge
+	if isTTY {
+		c4id := ""
 		if !e.C4ID.IsNil() {
 			c4id = e.C4ID.String()
 		}
-		fmt.Fprintf(w, "%s  %8s %s %s %s\n", mode, size, ts, name, c4id)
-	} else {
-		fmt.Fprintf(w, "%s  %8s %s %s\n", mode, size, ts, name)
+		if c4id != "" {
+			width := terminalWidth()
+			padding := width - len(base) - len(c4id)
+			if padding < 2 {
+				padding = 2
+			}
+			fmt.Fprintf(w, "%s%s%s\n", base, strings.Repeat(" ", padding), c4id)
+		} else {
+			fmt.Fprintln(w, base)
+		}
+		return
 	}
+
+	// Piped, no showIDs: clean human format
+	fmt.Fprintln(w, base)
+}
+
+// terminalWidth returns the current terminal width, defaulting to 120.
+func terminalWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w <= 0 {
+		return 120
+	}
+	return w
 }
 
 // isTerminal returns true if stdout is a terminal.
