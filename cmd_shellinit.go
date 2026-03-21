@@ -133,6 +133,14 @@ function mkdir {
         command mkdir "$@"
     fi
 }
+
+# pvd: print virtual directory — the c4m equivalent of pwd.
+# Only meaningful inside a c4m context. Safe to use in command substitution.
+function pvd {
+    if [ -n "$C4_CONTEXT" ]; then
+        command c4sh pvd
+    fi
+}
 `
 
 const bashScript = sharedScript + `

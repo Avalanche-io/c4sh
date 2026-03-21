@@ -39,6 +39,8 @@ func main() {
 		runLs(args)
 	case "cat":
 		runCat(args)
+	case "pvd":
+		runPvd()
 
 	// Editing
 	case "cp":
