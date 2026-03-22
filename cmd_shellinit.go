@@ -94,11 +94,16 @@ function ls {
     fi
 }
 
+# Save the user's cat command (alias or binary) before overriding.
+__c4sh_real_cat="$(alias cat 2>/dev/null | sed "s/^alias cat='//" | sed "s/'$//" || echo "command cat")"
+[ -z "$__c4sh_real_cat" ] && __c4sh_real_cat="command cat"
+unalias cat 2>/dev/null
+
 function cat {
     if [ -n "$C4_CONTEXT" ] || __c4sh_needs_c4m "$@"; then
         command c4sh cat "$@"
     else
-        command cat "$@"
+        eval "$__c4sh_real_cat" '"$@"'
     fi
 }
 
