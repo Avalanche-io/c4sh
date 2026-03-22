@@ -134,11 +134,10 @@ func cpRealToC4m(src, dst string) {
 		}
 
 		// Store content for each file entry and merge into destination manifest.
-		paths := c4m.EntryPaths(scanned.Entries)
-		for relPath, e := range paths {
+		// The scanned manifest is already in correct hierarchical order.
+		// Use EntryPath() from the manifest for full path resolution.
+		for _, e := range scanned.Entries {
 			cp := *e // shallow copy
-
-			// Adjust depth for destination subpath
 			cp.Depth = baseDepth + e.Depth
 
 			if e.IsDir() {
@@ -150,7 +149,7 @@ func cpRealToC4m(src, dst string) {
 				continue
 			}
 
-			// Store file content
+			relPath := scanned.EntryPath(e)
 			absPath := filepath.Join(src, filepath.FromSlash(relPath))
 			id, sErr := storeFile(store, absPath)
 			if sErr != nil {
