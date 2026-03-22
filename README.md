@@ -22,18 +22,114 @@ $ cd
 
 ## Install
 
-c4sh is part of the [c4 toolkit](https://github.com/Avalanche-io/c4).
-See the c4 README for installation instructions.
+```bash
+go install github.com/Avalanche-io/c4sh@latest
+```
 
-Then add shell integration:
+## Shell integration
+
+c4sh wraps `cd`, `ls`, `cat`, `cp`, `mv`, `rm`, and `mkdir` so they work
+transparently inside c4m files. Outside c4m context, every command passes
+through to the real binary untouched.
+
+Add this line to your shell config:
 
 ```bash
-# bash / zsh
-echo 'eval "$(c4sh shell-init)"' >> ~/.zshrc   # or ~/.bashrc
+# bash (~/.bashrc) or zsh (~/.zshrc)
+eval "$(c4sh shell-init)"
+```
 
-# PowerShell
+```powershell
+# PowerShell ($PROFILE)
 Invoke-Expression (c4sh shell-init --powershell)
 ```
+
+### Placement matters
+
+The `eval` line must come **after** any aliases for commands c4sh wraps.
+c4sh captures existing aliases (like `cat` aliased to `bat`) and preserves
+them when you're not in a c4m. If the eval runs before the alias is
+defined, the fallback will be the plain binary instead of your alias.
+
+```bash
+# ~/.bashrc — correct order
+
+# Your aliases first
+alias cat="bat --paging=never"
+alias ll="ls -lah"
+
+# c4sh last — captures aliases above
+eval "$(c4sh shell-init)"
+```
+
+### Prompt
+
+c4sh provides `__c4sh_context`, a function that outputs the current c4m
+context when active and nothing otherwise. Add it to your prompt wherever
+you want — c4sh does not modify your prompt automatically.
+
+```bash
+# bash — add before your prompt character
+PS1='\u@\h \w$(__c4sh_context) $ '
+
+# Produces:
+#   joshua@host ~/projects $              (normal)
+#   joshua@host ~/projects c4 myfile:/ $  (in c4m root)
+#   joshua@host ~/projects c4 myfile:/src/ $  (in c4m subdir)
+```
+
+```zsh
+# zsh
+PROMPT='%n@%m %~ $(__c4sh_context) %# '
+```
+
+The context string includes the c4m name (without `.c4m` extension) and
+the current path within it. It appears only when you're inside a c4m.
+
+### Virtual directory
+
+`pvd` (print virtual directory) works everywhere:
+
+```bash
+~/projects $ pvd
+/Users/joshua/projects           # outside c4m: same as pwd
+
+~/projects $ cd project.c4m
+~/projects c4 project:/ $ pvd
+/Users/joshua/projects/project.c4m:/    # inside c4m: full resolvable path
+
+~/projects c4 project:/ $ cd src
+~/projects c4 project:/src/ $ pvd
+/Users/joshua/projects/project.c4m:/src/
+```
+
+The output is a valid c4m colon path that other c4sh commands understand.
+`pwd` is never modified — it always returns the real filesystem path.
+
+### What gets wrapped
+
+| Command | In c4m context | Outside context |
+|---------|---------------|-----------------|
+| `cd` | Navigate within c4m; `cd ..` from root exits | Normal `cd` |
+| `ls` | List c4m entries; `-i` shows C4 IDs | Your normal `ls` (with aliases) |
+| `cat` | Stream content from store by C4 ID | Your normal `cat` (preserves bat alias) |
+| `cp` | Copy across the c4m boundary | Normal `cp` |
+| `mv` | Rename c4m entries | Normal `mv` |
+| `rm` | Remove c4m entries | Normal `rm` |
+| `mkdir` | Create directory entries | Normal `mkdir` |
+| `pvd` | Full c4m colon path | Same as `pwd` |
+
+### ls flags in c4m context
+
+| Flag | Effect |
+|------|--------|
+| `-l` | Long format: mode, size, date, name |
+| `-li` | Long format with C4 IDs (right-aligned on terminal, canonical c4m when piped) |
+| `-a` | Include hidden entries |
+| `-1` | One entry per line |
+
+`ls -li | grep` outputs canonical c4m entry format — parseable, greppable,
+and usable as input to other c4 tools.
 
 ## The colon boundary
 
