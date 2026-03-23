@@ -44,18 +44,21 @@ func detectShell(args []string) string {
 	}
 
 	sh := os.Getenv("SHELL")
-	base := filepath.Base(sh)
-	if strings.HasPrefix(base, "bash") {
-		return "bash"
+	if sh != "" {
+		base := filepath.Base(sh)
+		if strings.HasPrefix(base, "bash") {
+			return "bash"
+		}
+		if strings.HasPrefix(base, "zsh") {
+			return "zsh"
+		}
+		return base
 	}
-	if strings.HasPrefix(base, "zsh") {
-		return "zsh"
-	}
-	// Check for PowerShell via PSModulePath (set in all PS sessions)
+	// No SHELL env var — check for PowerShell via PSModulePath
 	if os.Getenv("PSModulePath") != "" {
 		return "powershell"
 	}
-	return base
+	return ""
 }
 
 // __c4sh_needs_c4m checks if args reference a c4m (colon syntax, .c4m suffix,
