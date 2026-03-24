@@ -22,9 +22,22 @@ $ cd
 
 ## Install
 
+### Homebrew (recommended — includes c4 and c4sh)
+
+```bash
+brew install Avalanche-io/tap/c4
+```
+
+### From source
+
 ```bash
 go install github.com/Avalanche-io/c4sh@latest
 ```
+
+### Binary downloads
+
+See [c4toolkit](https://github.com/Avalanche-io/c4toolkit) for
+pre-built archives and the full suite.
 
 ## Shell integration
 
@@ -287,4 +300,4 @@ See the [FAQ](https://github.com/Avalanche-io/c4/blob/main/docs/faq.md) for desi
 
 ## License
 
-MIT
+Apache 2.0
