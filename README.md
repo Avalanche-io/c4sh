@@ -25,7 +25,7 @@ $ cd
 ### Homebrew (recommended — includes c4 and c4sh)
 
 ```bash
-brew install Avalanche-io/tap/c4
+brew install mrjoshuak/tap/c4
 ```
 
 ### From source
