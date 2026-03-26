@@ -148,16 +148,14 @@ function mkdir {
 function pvd {
     command c4sh pvd
 }
-`
 
-const bashScript = sharedScript + `
 # Prompt helper: outputs c4m context string when active, empty otherwise.
-# Add $(__c4sh_context) to your PS1 wherever you want it to appear.
+# Add $(__c4sh_context) to your PS1/PROMPT wherever you want it to appear.
 #
-# Example:
+# Example (bash):
 #   PS1='\u@\h \w$(__c4sh_context) $ '
-#   # Output when in c4m: joshua@Abyss /tmp/test c4 project:/src/ $
-#   # Output normally:    joshua@Abyss /tmp/test $
+# Example (zsh):
+#   PROMPT='%n@%m %~ $(__c4sh_context) %# '
 #
 __c4sh_context() {
     if [ -n "$C4_CONTEXT" ]; then
@@ -167,7 +165,9 @@ __c4sh_context() {
         printf ' c4 %s:%s' "$name" "${cwd:-/}"
     fi
 }
+`
 
+const bashScript = sharedScript + `
 # Tab completion for bash.
 __c4sh_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
@@ -188,12 +188,6 @@ complete -o default -F __c4sh_complete ls cat cp mv rm mkdir cd
 `
 
 const zshScript = sharedScript + `
-# Prompt helper (same function defined in shared script).
-# Add $(__c4sh_context) to your PROMPT wherever you want it.
-#
-# Example:
-#   PROMPT='%n@%m %~ $(__c4sh_context) %# '
-
 # Tab completion for zsh.
 __c4sh_complete() {
     if [[ -z "$C4_CONTEXT" && "${words[1]}" != "cd" ]]; then
