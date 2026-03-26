@@ -194,19 +194,6 @@ rm -rf scratch/                  # removes entries; content stays in store
 cd                               # back to the real filesystem
 ```
 
-Your prompt shows when you're inside a c4m. If your PS1 contains `\$ `
-(bash) or `%# ` (zsh), the c4m context is inserted inline:
-
-```
-joshua@abyss ~/projects c4 project:/ $
-```
-
-Otherwise the context is prepended as a fallback:
-
-```
-c4 project:/ joshua@abyss ~/projects $
-```
-
 Outside c4m context, your real commands run untouched — the shell
 wrappers pass through to the original `ls`, `cp`, etc.
 
