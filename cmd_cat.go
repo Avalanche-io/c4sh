@@ -115,17 +115,6 @@ func catFromC4mTo(w io.Writer, c4mPath, subPath string) error {
 	return nil
 }
 
-// copyToStdout copies src to stdout, handling broken pipe gracefully.
-func copyToStdout(src io.Reader) {
-	if _, err := io.Copy(os.Stdout, src); err != nil {
-		if isBrokenPipe(err) {
-			osExit(0)
-		}
-		fmt.Fprintf(os.Stderr, "c4sh: cat: write error: %v\n", err)
-		osExit(1)
-	}
-}
-
 // hasC4mArg returns true if any non-flag argument references a c4m file.
 func hasC4mArg(args []string) bool {
 	for _, arg := range args {

@@ -118,11 +118,6 @@ func poolManifest(m *c4m.Manifest, src c4store.Store, c4mPath, outDir string) (p
 	return res, nil
 }
 
-// entryName returns a short display name for an entry (for error messages).
-func entryName(m *c4m.Manifest, e *c4m.Entry) string {
-	return entryFullPath(m, e)
-}
-
 // copyFile copies a regular file.
 func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {

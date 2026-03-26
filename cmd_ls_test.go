@@ -497,36 +497,6 @@ func TestPrintEntries_WritesToStdout(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// printLongEntry (wrapper)
-// --------------------------------------------------------------------------
-
-func TestPrintLongEntry_WritesToStdout(t *testing.T) {
-	e := &c4m.Entry{
-		Name:      "test.txt",
-		Mode:      0644,
-		Size:      42,
-		Depth:     0,
-		Timestamp: c4m.NullTimestamp(),
-	}
-
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = origStdout })
-
-	printLongEntry(e, false)
-
-	w.Close()
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	os.Stdout = origStdout
-
-	if !strings.Contains(buf.String(), "test.txt") {
-		t.Errorf("expected test.txt in output: %q", buf.String())
-	}
-}
-
-// --------------------------------------------------------------------------
 // isTerminal (smoke test — cannot test TTY in CI)
 // --------------------------------------------------------------------------
 

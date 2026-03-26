@@ -1662,7 +1662,7 @@ func TestExitContext_Success(t *testing.T) {
 }
 
 // ===========================================================================
-// listPath / printEntries / printLongEntry (thin wrappers)
+// listPath / printEntries (thin wrappers)
 // ===========================================================================
 
 func TestListPath_Success(t *testing.T) {
@@ -1701,21 +1701,6 @@ func TestPrintEntries_Wrapper(t *testing.T) {
 	os.Stdout = w
 
 	printEntries(entries, false, true, true, false)
-
-	w.Close()
-	os.Stdout = old
-}
-
-func TestPrintLongEntry_Wrapper(t *testing.T) {
-	te := newTestEnv(t)
-	m := te.loadC4m(t)
-	e := findEntry(m, "hello.txt")
-
-	old := os.Stdout
-	_, w, _ := os.Pipe()
-	os.Stdout = w
-
-	printLongEntry(e, false)
 
 	w.Close()
 	os.Stdout = old

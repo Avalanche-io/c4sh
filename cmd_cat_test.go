@@ -288,29 +288,6 @@ func TestCatFromC4m_ErrorCallsExit(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// copyToStdout
-// --------------------------------------------------------------------------
-
-func TestCopyToStdout_Success(t *testing.T) {
-	// Redirect stdout
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = origStdout })
-
-	copyToStdout(strings.NewReader("test output"))
-
-	w.Close()
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	os.Stdout = origStdout
-
-	if buf.String() != "test output" {
-		t.Errorf("output = %q, want %q", buf.String(), "test output")
-	}
-}
-
-// --------------------------------------------------------------------------
 // Content not in store
 // --------------------------------------------------------------------------
 

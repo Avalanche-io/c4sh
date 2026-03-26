@@ -206,11 +206,6 @@ func printEntriesTo(w io.Writer, entries []*c4m.Entry, long, showAll, onePerLine
 	}
 }
 
-// printLongEntry prints a single entry in long format to stdout.
-func printLongEntry(e *c4m.Entry, showIDs bool) {
-	printLongEntryTo(os.Stdout, e, showIDs)
-}
-
 // printLongEntryTo prints a single entry in long format to w.
 //
 // showIDs controls whether C4 IDs appear (requires -i flag).

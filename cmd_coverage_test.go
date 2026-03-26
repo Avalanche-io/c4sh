@@ -777,22 +777,6 @@ func TestBuildPath_Nested(t *testing.T) {
 }
 
 // ===========================================================================
-// pool: entryName
-// ===========================================================================
-
-func TestEntryName(t *testing.T) {
-	m := buildSimpleManifest()
-	e, _ := findEntryByPath(m, "hello.txt")
-	if e == nil {
-		t.Fatal("hello.txt not found")
-	}
-	name := entryName(m, e)
-	if name != "hello.txt" {
-		t.Errorf("entryName = %q, want %q", name, "hello.txt")
-	}
-}
-
-// ===========================================================================
 // pool: copyFile
 // ===========================================================================
 
