@@ -9,5 +9,3 @@ require (
 )
 
 require golang.org/x/sys v0.42.0 // indirect
-
-replace github.com/Avalanche-io/c4 => ../c4
