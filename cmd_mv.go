@@ -62,8 +62,13 @@ func runMv(args []string) {
 // modified in place via MoveEntry (entry renamed, depths adjusted, re-sorted).
 // srcSub and dstSub are paths relative to the c4m root.
 func mvEntry(m *c4m.Manifest, srcSub, dstSub string) error {
-	// Find source entry by full path
+	// Find source entry by full path. Directory entries are keyed with a
+	// trailing slash and the shell path resolution strips it, so try the
+	// path as given, then the directory spelling (as rm and cp do).
 	srcEntry := m.GetEntry(srcSub)
+	if srcEntry == nil {
+		srcEntry = m.GetEntry(strings.TrimSuffix(srcSub, "/") + "/")
+	}
 	if srcEntry == nil {
 		return fmt.Errorf("%s: not found", srcSub)
 	}

@@ -51,40 +51,58 @@ func TestMvEntry_MoveFileIntoDir(t *testing.T) {
 }
 
 func TestMvEntry_MoveDirDescendantsUpdateDepth(t *testing.T) {
-	// Create manifest: a/ -> child.txt at depth 1, then move a/ under sub/
-	m := c4m.NewManifest()
-	m.AddEntry(&c4m.Entry{
-		Name: "a/", Depth: 0, Mode: os.ModeDir | 0755, Size: -1,
-		Timestamp: c4m.NullTimestamp(),
-	})
-	m.AddEntry(&c4m.Entry{
-		Name: "child.txt", Depth: 1, Mode: 0644, Size: 10,
-		Timestamp: c4m.NullTimestamp(),
-	})
-	m.AddEntry(&c4m.Entry{
-		Name: "sub/", Depth: 0, Mode: os.ModeDir | 0755, Size: -1,
-		Timestamp: c4m.NullTimestamp(),
-	})
-	m.SortEntries()
+	// Create manifest: a/ -> child.txt at depth 1, then move a/ under sub/.
+	// Directory entries are keyed "a/" but the shell strips the slash, so
+	// every spelling of source and destination must work.
+	cases := []struct{ src, dst string }{
+		{"a/", "sub/"},
+		{"a", "sub"},
+		{"a", "sub/"},
+		{"a/", "sub"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.src+"->"+tc.dst, func(t *testing.T) {
+			m := c4m.NewManifest()
+			m.AddEntry(&c4m.Entry{
+				Name: "a/", Depth: 0, Mode: os.ModeDir | 0755, Size: -1,
+				Timestamp: c4m.NullTimestamp(),
+			})
+			m.AddEntry(&c4m.Entry{
+				Name: "child.txt", Depth: 1, Mode: 0644, Size: 10,
+				Timestamp: c4m.NullTimestamp(),
+			})
+			m.AddEntry(&c4m.Entry{
+				Name: "sub/", Depth: 0, Mode: os.ModeDir | 0755, Size: -1,
+				Timestamp: c4m.NullTimestamp(),
+			})
+			m.SortEntries()
 
-	if err := mvEntry(m, "a/", "sub/"); err != nil {
-		t.Fatalf("mvEntry dir: %v", err)
-	}
+			if err := mvEntry(m, tc.src, tc.dst); err != nil {
+				t.Fatalf("mvEntry dir: %v", err)
+			}
 
-	aEntry, _ := findEntryByPath(m, "sub/a/")
-	if aEntry == nil {
-		t.Fatal("sub/a/ should exist after move")
-	}
-	if aEntry.Depth != 1 {
-		t.Errorf("a/ depth = %d, want 1", aEntry.Depth)
-	}
+			if e, _ := findEntryByPath(m, "a/"); e != nil {
+				t.Error("a/ should not exist at root after move")
+			}
+			aEntry, _ := findEntryByPath(m, "sub/a/")
+			if aEntry == nil {
+				t.Fatal("sub/a/ should exist after move")
+			}
+			if aEntry.Name != "a/" {
+				t.Errorf("moved dir name = %q, want \"a/\"", aEntry.Name)
+			}
+			if aEntry.Depth != 1 {
+				t.Errorf("a/ depth = %d, want 1", aEntry.Depth)
+			}
 
-	childEntry, _ := findEntryByPath(m, "sub/a/child.txt")
-	if childEntry == nil {
-		t.Fatal("sub/a/child.txt should exist after move")
-	}
-	if childEntry.Depth != 2 {
-		t.Errorf("child.txt depth = %d, want 2", childEntry.Depth)
+			childEntry, _ := findEntryByPath(m, "sub/a/child.txt")
+			if childEntry == nil {
+				t.Fatal("sub/a/child.txt should exist after move")
+			}
+			if childEntry.Depth != 2 {
+				t.Errorf("child.txt depth = %d, want 2", childEntry.Depth)
+			}
+		})
 	}
 }
 
@@ -145,21 +163,66 @@ func TestMvEntry_MoveToRoot(t *testing.T) {
 }
 
 func TestMvEntry_RenameDir(t *testing.T) {
-	m := buildSimpleManifest()
+	// Renaming a directory must work whether or not the user typed the
+	// trailing slash on either side; the result is always a "renamed/"
+	// entry with its children re-parented and depths intact.
+	cases := []struct{ src, dst string }{
+		{"sub/", "renamed/"},
+		{"sub", "renamed"},
+		{"sub", "renamed/"},
+		{"sub/", "renamed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.src+"->"+tc.dst, func(t *testing.T) {
+			m := buildSimpleManifest()
 
-	if err := mvEntry(m, "sub/", "renamed/"); err != nil {
-		t.Fatalf("mvEntry rename dir: %v", err)
-	}
+			if err := mvEntry(m, tc.src, tc.dst); err != nil {
+				t.Fatalf("mvEntry rename dir: %v", err)
+			}
 
-	if e, _ := findEntryByPath(m, "sub/"); e != nil {
-		t.Error("sub/ should not exist after rename")
+			if e, _ := findEntryByPath(m, "sub/"); e != nil {
+				t.Error("sub/ should not exist after rename")
+			}
+			dir, _ := findEntryByPath(m, "renamed/")
+			if dir == nil {
+				t.Fatal("renamed/ should exist after rename")
+			}
+			if dir.Name != "renamed/" || !dir.IsDir() {
+				t.Errorf("renamed entry = %q (dir=%v), want \"renamed/\" directory", dir.Name, dir.IsDir())
+			}
+			if dir.Depth != 0 {
+				t.Errorf("renamed/ depth = %d, want 0", dir.Depth)
+			}
+			// Descendants should be under renamed/
+			child, _ := findEntryByPath(m, "renamed/nested.txt")
+			if child == nil {
+				t.Fatal("renamed/nested.txt should exist after dir rename")
+			}
+			if child.Depth != 1 {
+				t.Errorf("nested.txt depth = %d, want 1", child.Depth)
+			}
+			if len(m.Entries) != 3 {
+				t.Errorf("entry count = %d, want 3", len(m.Entries))
+			}
+		})
 	}
-	if e, _ := findEntryByPath(m, "renamed/"); e == nil {
-		t.Error("renamed/ should exist after rename")
-	}
-	// Descendants should be under renamed/
-	if e, _ := findEntryByPath(m, "renamed/nested.txt"); e == nil {
-		t.Error("renamed/nested.txt should exist after dir rename")
+}
+
+func TestMvEntry_DirSourceNotFound(t *testing.T) {
+	// A name that exists in neither spelling is still an error, not a
+	// silent no-op, with or without the slash.
+	for _, src := range []string{"nosuchdir", "nosuchdir/"} {
+		m := buildSimpleManifest()
+		err := mvEntry(m, src, "renamed")
+		if err == nil {
+			t.Fatalf("mvEntry(%q): expected error for missing source", src)
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("mvEntry(%q) error = %q, want 'not found'", src, err)
+		}
+		if len(m.Entries) != 3 {
+			t.Errorf("mvEntry(%q) modified manifest: %d entries, want 3", src, len(m.Entries))
+		}
 	}
 }
 

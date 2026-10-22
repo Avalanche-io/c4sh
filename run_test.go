@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Avalanche-io/c4/c4m"
 	c4store "github.com/Avalanche-io/c4/store"
 
 	"github.com/Avalanche-io/c4sh/internal/ctx"
@@ -1188,6 +1189,100 @@ func TestRunMv_NonexistentSource(t *testing.T) {
 	withTestExit(t)
 
 	code := catchExit(func() { runMv([]string{"nosuch.txt", "renamed.txt"}) })
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+}
+
+func TestRunMv_RenameDir(t *testing.T) {
+	// The shell path resolver strips a trailing slash, so from the CLI the
+	// source is always "sub"; both user spellings must rename the directory.
+	for _, tc := range []struct{ src, dst string }{
+		{"sub", "renamed"},
+		{"sub/", "renamed/"},
+	} {
+		t.Run(tc.src+"->"+tc.dst, func(t *testing.T) {
+			te := newTestEnv(t)
+			t.Setenv("C4_CONTEXT", te.c4mPath)
+			t.Setenv("C4_CWD", "")
+			withTestExit(t)
+
+			code := catchExit(func() { runMv([]string{tc.src, tc.dst}) })
+			if code != -1 {
+				t.Fatalf("unexpected exit = %d", code)
+			}
+
+			m := te.loadC4m(t)
+			if e, _ := findEntryByPath(m, "sub/"); e != nil {
+				t.Error("sub/ should not exist after rename")
+			}
+			dir, _ := findEntryByPath(m, "renamed/")
+			if dir == nil {
+				t.Fatal("renamed/ should exist after rename")
+			}
+			if dir.Depth != 0 {
+				t.Errorf("renamed/ depth = %d, want 0", dir.Depth)
+			}
+			child, _ := findEntryByPath(m, "renamed/nested.txt")
+			if child == nil {
+				t.Fatal("renamed/nested.txt should exist after rename")
+			}
+			if child.Depth != 1 {
+				t.Errorf("nested.txt depth = %d, want 1", child.Depth)
+			}
+		})
+	}
+}
+
+func TestRunMv_MoveDirIntoDir(t *testing.T) {
+	te := newTestEnv(t)
+	t.Setenv("C4_CONTEXT", te.c4mPath)
+	t.Setenv("C4_CWD", "")
+	withTestExit(t)
+
+	// Add a second root directory to move sub/ into.
+	m := te.loadC4m(t)
+	m.AddEntry(&c4m.Entry{
+		Name: "archive/", Depth: 0, Mode: os.ModeDir | 0755, Size: -1,
+		Timestamp: c4m.NullTimestamp(),
+	})
+	m.SortEntries()
+	if err := saveManifest(te.c4mPath, m); err != nil {
+		t.Fatalf("saveManifest: %v", err)
+	}
+
+	code := catchExit(func() { runMv([]string{"sub", "archive"}) })
+	if code != -1 {
+		t.Fatalf("unexpected exit = %d", code)
+	}
+
+	m = te.loadC4m(t)
+	if e, _ := findEntryByPath(m, "sub/"); e != nil {
+		t.Error("sub/ should not exist at root after move")
+	}
+	dir, _ := findEntryByPath(m, "archive/sub/")
+	if dir == nil {
+		t.Fatal("archive/sub/ should exist after move")
+	}
+	if dir.Depth != 1 {
+		t.Errorf("archive/sub/ depth = %d, want 1", dir.Depth)
+	}
+	child, _ := findEntryByPath(m, "archive/sub/nested.txt")
+	if child == nil {
+		t.Fatal("archive/sub/nested.txt should exist after move")
+	}
+	if child.Depth != 2 {
+		t.Errorf("nested.txt depth = %d, want 2", child.Depth)
+	}
+}
+
+func TestRunMv_NonexistentDirSource(t *testing.T) {
+	te := newTestEnv(t)
+	t.Setenv("C4_CONTEXT", te.c4mPath)
+	t.Setenv("C4_CWD", "")
+	withTestExit(t)
+
+	code := catchExit(func() { runMv([]string{"nosuchdir/", "renamed/"}) })
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
