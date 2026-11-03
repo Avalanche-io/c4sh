@@ -13,7 +13,7 @@ import (
 	"github.com/Avalanche-io/c4sh/internal/ctx"
 )
 
-const version = "1.0.22"
+const version = "1.0.23"
 
 func main() {
 	if len(os.Args) < 2 {
