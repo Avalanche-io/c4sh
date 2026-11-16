@@ -84,13 +84,19 @@ func captureTree(t *testing.T, root, c4mPath string) string {
 	return string(b)
 }
 
+// editCase is one edit made with c4sh and on disk.
+type editCase struct {
+	name    string
+	c4sh    [][]string // c4sh commands; paths are relative to the c4m
+	disk    func(root string) error
+	nullRel string // a folder c4sh created, whose time it does not know
+	// inContext runs the commands inside the c4m (C4_CONTEXT set, bare
+	// paths) instead of with explicit c4m:path arguments.
+	inContext bool
+}
+
 func TestEditsMatchARescanOfTheEditedTree(t *testing.T) {
-	cases := []struct {
-		name    string
-		c4sh    [][]string // c4sh commands; paths are relative to the c4m
-		disk    func(root string) error
-		nullRel string // a folder c4sh created, whose time it does not know
-	}{
+	runEditCases(t, []editCase{
 		{
 			name:    "mkdir beside existing folders (README L191)",
 			c4sh:    [][]string{{"mkdir", "deliveries/v4/"}},
@@ -157,8 +163,13 @@ func TestEditsMatchARescanOfTheEditedTree(t *testing.T) {
 				return os.Rename(filepath.Join(r, "shots/010/comp.nk"), filepath.Join(r, "comp.nk"))
 			},
 		},
-	}
+	})
+}
 
+// runEditCases makes each edit with c4sh on a captured c4m and on disk,
+// and requires the c4m to equal a capture of the edited tree.
+func runEditCases(t *testing.T, cases []editCase) {
+	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -174,6 +185,10 @@ func TestEditsMatchARescanOfTheEditedTree(t *testing.T) {
 			buildEditTree(t, root)
 			c4mPath := filepath.Join(dir, "project.c4m")
 			captureTree(t, root, c4mPath)
+			if tc.inContext {
+				t.Setenv("C4_CONTEXT", c4mPath)
+				t.Setenv("C4_CWD", "")
+			}
 
 			for _, cmd := range tc.c4sh {
 				args := make([]string, 0, len(cmd)-1)
@@ -182,9 +197,13 @@ func TestEditsMatchARescanOfTheEditedTree(t *testing.T) {
 						args = append(args, a)
 						continue
 					}
-					args = append(args, c4mPath+":"+a)
+					if tc.inContext {
+						args = append(args, a)
+					} else {
+						args = append(args, c4mPath+":"+a)
+					}
 				}
-				run := map[string]func([]string){"mv": runMv, "mkdir": runMkdir}[cmd[0]]
+				run := map[string]func([]string){"mv": runMv, "mkdir": runMkdir, "rm": runRm}[cmd[0]]
 				if code := catchExit(func() { run(args) }); code != -1 {
 					t.Fatalf("c4sh %s: exit %d", strings.Join(cmd, " "), code)
 				}
@@ -289,4 +308,35 @@ func TestRederiveKeepsANullChildSizeNull(t *testing.T) {
 	if c := m.GetEntry("top/collapsed/"); c.Size != -1 {
 		t.Errorf("collapsed/ size = %d, want it left null", c.Size)
 	}
+}
+
+// rm removes entries from their folder's listing, so the folder and every
+// folder above it are re-derived. These run inside the c4m at its root.
+func TestRmMatchesARescanOfTheEditedTree(t *testing.T) {
+	runEditCases(t, []editCase{
+		{
+			name:      "rm a file from a nested folder",
+			c4sh:      [][]string{{"rm", "deliveries/v3/notes/n.txt"}},
+			disk:      func(r string) error { return os.Remove(filepath.Join(r, "deliveries/v3/notes/n.txt")) },
+			inContext: true,
+		},
+		{
+			name:      "rm the only file in a folder",
+			c4sh:      [][]string{{"rm", "shots/010/comp.nk"}},
+			disk:      func(r string) error { return os.Remove(filepath.Join(r, "shots/010/comp.nk")) },
+			inContext: true,
+		},
+		{
+			name:      "rm -rf a nested folder (README L193)",
+			c4sh:      [][]string{{"rm", "-rf", "deliveries/v3/"}},
+			disk:      func(r string) error { return os.RemoveAll(filepath.Join(r, "deliveries/v3")) },
+			inContext: true,
+		},
+		{
+			name:      "rm -rf a folder at the root",
+			c4sh:      [][]string{{"rm", "-rf", "shots/"}},
+			disk:      func(r string) error { return os.RemoveAll(filepath.Join(r, "shots")) },
+			inContext: true,
+		},
+	})
 }
