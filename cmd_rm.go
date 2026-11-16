@@ -85,23 +85,11 @@ func rmEntries(m *c4m.Manifest, subPaths []string, recursive, force bool) (modif
 			continue
 		}
 
-		// Collect entries to remove: the entry itself + descendants
-		toRemove := map[*c4m.Entry]bool{entry: true}
-		if entry.IsDir() {
-			for _, d := range m.Descendants(entry) {
-				toRemove[d] = true
-			}
-		}
-
-		// Remove entries
-		newEntries := make([]*c4m.Entry, 0, len(m.Entries)-len(toRemove))
-		for _, e := range m.Entries {
-			if !toRemove[e] {
-				newEntries = append(newEntries, e)
-			}
-		}
-		m.Entries = newEntries
-		m.InvalidateIndex()
+		// Remove the entry and everything below it. The folder it was in
+		// has a new listing, so it and the folders above it are re-derived.
+		parent := m.Parent(entry)
+		takeSubtree(m, entry)
+		rederiveDirs(m, parent)
 		modified = true
 	}
 	return
