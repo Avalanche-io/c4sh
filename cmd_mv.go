@@ -89,12 +89,16 @@ func mvEntry(m *c4m.Manifest, srcSub, dstSub string) error {
 		if srcEntry.IsDir() {
 			effDst += "/"
 		}
-		dstEntry = nil // recalculate below
+		// The name inside the folder may be taken too.
+		dstEntry = m.GetEntry(strings.TrimSuffix(effDst, "/"))
+		if dstEntry == nil {
+			dstEntry = m.GetEntry(strings.TrimSuffix(effDst, "/") + "/")
+		}
 	}
 
 	// Check destination doesn't already exist (unless it's a directory we're moving into)
 	if dstEntry != nil && dstEntry != srcEntry {
-		return fmt.Errorf("%s: already exists", dstSub)
+		return fmt.Errorf("%s: already exists", strings.TrimSuffix(effDst, "/"))
 	}
 
 	// Parse destination into parent path and new name
@@ -113,8 +117,39 @@ func mvEntry(m *c4m.Manifest, srcSub, dstSub string) error {
 		}
 	}
 
-	// Use the c4m package's MoveEntry which handles depth adjustment,
-	// descendant updates, index invalidation, and re-sorting.
-	m.MoveEntry(srcEntry, newParent, dstName)
+	// A folder can't move into itself or below itself.
+	if newParent != nil && srcEntry.IsDir() {
+		if newParent == srcEntry {
+			return fmt.Errorf("cannot move %s into itself", srcSub)
+		}
+		for _, a := range m.Ancestors(newParent) {
+			if a == srcEntry {
+				return fmt.Errorf("cannot move %s into itself", srcSub)
+			}
+		}
+	}
+
+	// Take the entry and its subtree out, give it its new name and
+	// depths, and put it directly under its new parent. c4m.MoveEntry
+	// changes the depths but leaves the entries where they are, so the
+	// c4m package reads the moved entry as a child of whichever folder
+	// precedes it.
+	oldParent := m.Parent(srcEntry)
+	targetDepth := 0
+	if newParent != nil {
+		targetDepth = newParent.Depth + 1
+	}
+	block := takeSubtree(m, srcEntry)
+	delta := targetDepth - srcEntry.Depth
+	for _, e := range block {
+		e.Depth += delta
+	}
+	srcEntry.Name = dstName
+	placeSubtree(m, newParent, block)
+
+	// Both folders' listings changed, so their sizes and IDs (and their
+	// ancestors') are re-derived. The moved entry's own values don't
+	// depend on where it sits.
+	rederiveDirs(m, oldParent, newParent)
 	return nil
 }

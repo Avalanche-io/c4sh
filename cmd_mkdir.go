@@ -102,28 +102,39 @@ func mkdirOne(m *c4m.Manifest, dirPath string, errs *int) bool {
 		return false
 	}
 
-	// Determine parent and depth
 	parent, name := splitDirName(dirPath)
-	depth := 0
+	var parentEntry *c4m.Entry
 	if parent != "" {
-		parentEntry := m.GetEntry(parent + "/")
+		parentEntry = m.GetEntry(parent + "/")
 		if parentEntry == nil {
 			fmt.Fprintf(os.Stderr, "c4sh: mkdir: %s: parent directory does not exist\n", dirPath)
 			*errs++
 			return false
 		}
-		depth = parentEntry.Depth + 1
 	}
+	addEmptyDir(m, parentEntry, name)
+	return true
+}
 
+// addEmptyDir puts a new, empty folder named name under parent (nil for the
+// root) and re-derives the folders above it. An empty folder's size (0) and
+// C4 ID (the empty listing's) are known; its timestamp is not, since no
+// folder on disk was observed, so it stays null.
+func addEmptyDir(m *c4m.Manifest, parent *c4m.Entry, name string) *c4m.Entry {
+	depth := 0
+	if parent != nil {
+		depth = parent.Depth + 1
+	}
 	entry := &c4m.Entry{
 		Name:      name + "/",
 		Depth:     depth,
 		Mode:      os.ModeDir | 0755,
-		Size:      -1,
 		Timestamp: c4m.NullTimestamp(),
 	}
-	m.AddEntry(entry)
-	return true
+	entry.Size, entry.Timestamp, entry.C4ID = deriveDir(entry, nil)
+	placeSubtree(m, parent, []*c4m.Entry{entry})
+	rederiveDirs(m, parent)
+	return entry
 }
 
 // mkdirAll creates a directory and all missing parent directories.
@@ -133,30 +144,14 @@ func mkdirAll(m *c4m.Manifest, dirPath string) bool {
 	parts := strings.Split(dirPath, "/")
 	modified := false
 
+	var parent *c4m.Entry
 	for i := range parts {
 		partial := strings.Join(parts[:i+1], "/")
-		if m.GetEntry(partial+"/") != nil {
+		if e := m.GetEntry(partial + "/"); e != nil {
+			parent = e
 			continue
 		}
-
-		// Determine parent depth
-		depth := 0
-		if i > 0 {
-			parentPath := strings.Join(parts[:i], "/")
-			parentEntry := m.GetEntry(parentPath + "/")
-			if parentEntry != nil {
-				depth = parentEntry.Depth + 1
-			}
-		}
-
-		entry := &c4m.Entry{
-			Name:      parts[i] + "/",
-			Depth:     depth,
-			Mode:      os.ModeDir | 0755,
-			Size:      -1,
-			Timestamp: c4m.NullTimestamp(),
-		}
-		m.AddEntry(entry)
+		parent = addEmptyDir(m, parent, parts[i])
 		modified = true
 	}
 
