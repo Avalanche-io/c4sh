@@ -48,7 +48,30 @@ func runRm(args []string) {
 		die("rm: %v", err)
 	}
 
-	modified, errs := rmEntries(m, paths, recursive, force)
+	// Each path names an entry of the same c4m: an explicit c4m:path, or
+	// a path relative to the current folder inside the c4m.
+	var subPaths []string
+	errs := 0
+	for _, p := range paths {
+		pC4m, sub := resolveContextPath(p)
+		if pC4m == "" {
+			pC4m, sub = c4mFile, p
+		}
+		if pC4m != c4mFile {
+			fmt.Fprintf(os.Stderr, "c4sh: rm: %s: cannot remove across c4m files\n", p)
+			errs++
+			continue
+		}
+		if sub == "" {
+			fmt.Fprintf(os.Stderr, "c4sh: rm: cannot remove the c4m root\n")
+			errs++
+			continue
+		}
+		subPaths = append(subPaths, sub)
+	}
+
+	modified, rmErrs := rmEntries(m, subPaths, recursive, force)
+	errs += rmErrs
 
 	if modified {
 		if err := saveManifest(c4mFile, m); err != nil {
@@ -75,12 +98,14 @@ func rmEntries(m *c4m.Manifest, subPaths []string, recursive, force bool) (modif
 		}
 		if entry == nil {
 			if !force {
+				fmt.Fprintf(os.Stderr, "c4sh: rm: %s: not found\n", strings.TrimSuffix(subPath, "/"))
 				errs++
 			}
 			continue
 		}
 
 		if entry.IsDir() && !recursive {
+			fmt.Fprintf(os.Stderr, "c4sh: rm: %s: is a directory\n", strings.TrimSuffix(subPath, "/"))
 			errs++
 			continue
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,4 +340,70 @@ func TestRmMatchesARescanOfTheEditedTree(t *testing.T) {
 			inContext: true,
 		},
 	})
+}
+
+// rm resolves its paths as the other verbs do: an explicit c4m:path, or a
+// path relative to the current folder inside a c4m.
+func TestRmResolvesC4mPathsAndTheCurrentFolder(t *testing.T) {
+	runEditCases(t, []editCase{
+		{
+			name: "explicit c4m:path",
+			c4sh: [][]string{{"rm", "shots/010/comp.nk"}},
+			disk: func(r string) error { return os.Remove(filepath.Join(r, "shots/010/comp.nk")) },
+		},
+		{
+			name: "explicit c4m:path, -rf a folder",
+			c4sh: [][]string{{"rm", "-rf", "deliveries/v3/"}},
+			disk: func(r string) error { return os.RemoveAll(filepath.Join(r, "deliveries/v3")) },
+		},
+	})
+
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store")
+	c4store.NewTreeStore(storePath)
+	t.Setenv("C4_STORE", storePath)
+	withTestExit(t)
+	root := filepath.Join(dir, "project")
+	buildEditTree(t, root)
+	c4mPath := filepath.Join(dir, "project.c4m")
+	captureTree(t, root, c4mPath)
+
+	t.Setenv("C4_CONTEXT", c4mPath)
+	t.Setenv("C4_CWD", "shots")
+	if code := catchExit(func() { runRm([]string{"010/comp.nk"}) }); code != -1 {
+		t.Fatalf("rm 010/comp.nk inside shots/: exit %d", code)
+	}
+	if err := os.Remove(filepath.Join(root, "shots/010/comp.nk")); err != nil {
+		t.Fatal(err)
+	}
+	pinTimes(t, root, "")
+	edited, _ := os.ReadFile(c4mPath)
+	if want := captureTree(t, root, filepath.Join(dir, "rescan.c4m")); string(edited) != want {
+		t.Errorf("rm inside shots/:\n%s\nrescan:\n%s", edited, want)
+	}
+}
+
+// rm says why it refused.
+func TestRmNamesWhatItCouldNotRemove(t *testing.T) {
+	te := newTestEnv(t)
+	t.Setenv("C4_CONTEXT", "")
+	withTestExit(t)
+	for args, want := range map[string]string{
+		"missing.txt": "missing.txt: not found",
+		"sub/":        "sub: is a directory",
+	} {
+		r, w, _ := os.Pipe()
+		orig := os.Stderr
+		os.Stderr = w
+		code := catchExit(func() { runRm([]string{te.c4mPath + ":" + args}) })
+		w.Close()
+		os.Stderr = orig
+		msg, _ := io.ReadAll(r)
+		if code != 1 {
+			t.Errorf("rm %s: exit %d, want 1", args, code)
+		}
+		if !strings.Contains(string(msg), want) {
+			t.Errorf("rm %s: stderr %q, want it to contain %q", args, msg, want)
+		}
+	}
 }

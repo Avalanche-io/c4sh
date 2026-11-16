@@ -1417,10 +1417,17 @@ func TestRunRm_CrossC4m(t *testing.T) {
 	t.Setenv("C4_CWD", "")
 	withTestExit(t)
 
-	// Try to rm a path from a different c4m
-	code := catchExit(func() { runRm([]string{te2.c4mPath + ":hello.txt"}) })
+	// Paths in two different c4m files: the first names the c4m, and the
+	// second is refused.
+	code := catchExit(func() { runRm([]string{te.c4mPath + ":hello.txt", te2.c4mPath + ":sub/nested.txt"}) })
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 for cross-c4m rm", code)
+	}
+	if e, _ := findEntryByPath(te2.loadC4m(t), "sub/nested.txt"); e == nil {
+		t.Error("rm changed the other c4m")
+	}
+	if e, _ := findEntryByPath(te.loadC4m(t), "sub/nested.txt"); e == nil {
+		t.Error("rm applied the other c4m's path to this one")
 	}
 }
 
