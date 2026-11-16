@@ -93,9 +93,6 @@ func cpRealToC4m(src, dst string) {
 	if err != nil {
 		die("cp: store: %v", err)
 	}
-	if store == nil {
-		die("cp: no content store configured (set C4_STORE or run c4 init)")
-	}
 
 	// Load or create destination manifest
 	m, _ := loadManifest(dstC4m)
@@ -184,9 +181,6 @@ func cpC4mToReal(src, dst string) {
 	store, err := openStore()
 	if err != nil {
 		die("cp: store: %v", err)
-	}
-	if store == nil {
-		die("cp: no content store configured (set C4_STORE or run c4 init)")
 	}
 
 	// What the source names decides the kind of copy, never how many
@@ -327,9 +321,6 @@ func cpMultiDest(src string, dests []string) {
 		store, sErr := openStore()
 		if sErr != nil {
 			die("cp: store: %v", sErr)
-		}
-		if store == nil {
-			die("cp: no content store configured (set C4_STORE or run c4 init)")
 		}
 		targets = append(targets, reconcile.ToStore(store))
 		c4mDests = append(c4mDests, c4mDest{c4mFile: c4mFile})
