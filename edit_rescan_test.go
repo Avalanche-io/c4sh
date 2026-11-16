@@ -48,10 +48,10 @@ func buildEditTree(t *testing.T, root string) {
 }
 
 // pinTimes sets every file and folder under root to editTime, except the
-// folder at rel (slash path), which gets the epoch: a scan reads the epoch
+// folders at nullRels (slash paths), which get the epoch: a scan reads the epoch
 // as a null timestamp, which is what c4sh mkdir records for a folder it
 // creates and never observed.
-func pinTimes(t *testing.T, root, nullRel string) {
+func pinTimes(t *testing.T, root string, nullRels ...string) {
 	t.Helper()
 	var paths []string
 	filepath.Walk(root, func(p string, _ os.FileInfo, err error) error {
@@ -64,8 +64,10 @@ func pinTimes(t *testing.T, root, nullRel string) {
 	// Children first, so setting a folder's time is the last write in it.
 	for i := len(paths) - 1; i >= 0; i-- {
 		ts := editTime
-		if nullRel != "" && paths[i] == filepath.Join(root, filepath.FromSlash(nullRel)) {
-			ts = time.Unix(0, 0)
+		for _, nullRel := range nullRels {
+			if nullRel != "" && paths[i] == filepath.Join(root, filepath.FromSlash(nullRel)) {
+				ts = time.Unix(0, 0)
+			}
 		}
 		if err := os.Chtimes(paths[i], ts, ts); err != nil {
 			t.Fatal(err)

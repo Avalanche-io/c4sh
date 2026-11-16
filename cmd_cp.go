@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
@@ -100,13 +99,6 @@ func cpRealToC4m(src, dst string) {
 		m = c4m.NewManifest()
 	}
 
-	// Determine the base depth for new entries based on dstSub
-	baseDepth := 0
-	if dstSub != "" {
-		baseDepth = strings.Count(strings.TrimSuffix(dstSub, "/"), "/") + 1
-		ensureParentDirs(m, dstSub)
-	}
-
 	if !info.IsDir() {
 		// Single file capture
 		id, err := storeFile(store, src)
@@ -116,13 +108,15 @@ func cpRealToC4m(src, dst string) {
 		name := filepath.Base(src)
 		entry := &c4m.Entry{
 			Name:      name,
-			Depth:     baseDepth,
+			Depth:     0,
 			Mode:      info.Mode(),
 			Size:      info.Size(),
 			Timestamp: info.ModTime().UTC(),
 			C4ID:      id,
 		}
-		m.AddEntry(entry)
+		if err := graftEntries(m, dstSub, nil, []*c4m.Entry{entry}); err != nil {
+			die("cp: %v", err)
+		}
 	} else {
 		// Directory capture — scan to produce manifest, then store content.
 		scanned, err := scan.Dir(src, scan.WithMode(scan.ModeFull))
@@ -130,15 +124,14 @@ func cpRealToC4m(src, dst string) {
 			die("cp: scan: %v", err)
 		}
 
-		// Store content for each file entry and merge into destination manifest.
-		// The scanned manifest is already in correct hierarchical order.
-		// Use EntryPath() from the manifest for full path resolution.
+		// Store content for each file entry. The scanned manifest is in
+		// walk order, so the kept entries are a block to graft.
+		var block []*c4m.Entry
 		for _, e := range scanned.Entries {
 			cp := *e // shallow copy
-			cp.Depth = baseDepth + e.Depth
 
 			if e.IsDir() {
-				m.AddEntry(&cp)
+				block = append(block, &cp)
 				continue
 			}
 
@@ -154,11 +147,16 @@ func cpRealToC4m(src, dst string) {
 				continue
 			}
 			cp.C4ID = id
-			m.AddEntry(&cp)
+			block = append(block, &cp)
+		}
+		// A folder the copy creates for the source takes the source's
+		// observed mode and time.
+		srcDir := &c4m.Entry{Name: info.Name() + "/", Mode: info.Mode(), Timestamp: info.ModTime().UTC()}
+		if err := graftEntries(m, dstSub, srcDir, block); err != nil {
+			die("cp: %v", err)
 		}
 	}
 
-	m.SortEntries()
 	if err := saveManifest(dstC4m, m); err != nil {
 		die("cp: %v", err)
 	}
@@ -265,27 +263,29 @@ func cpC4mToC4m(src, dst string) {
 		}
 	}
 
-	// Collect source entries
-	entries := entriesForSubtree(srcM, srcSub)
-	if len(entries) == 0 {
+	// A file is copied into dstSub; a folder (or the root) has its
+	// contents copied, and a folder the copy creates for it takes the
+	// source folder's mode and stated time.
+	target := subtreeRoot(srcM, srcSub)
+	if srcSub != "" && target == nil {
 		die("cp: %s: not found in %s", srcSub, srcC4m)
 	}
-
-	// Calculate destination base depth
-	dstBaseDepth := 0
-	if dstSub != "" {
-		dstBaseDepth = strings.Count(strings.TrimSuffix(dstSub, "/"), "/") + 1
-		ensureParentDirs(dstM, dstSub)
+	var block []*c4m.Entry
+	var srcDir *c4m.Entry
+	if target != nil && !target.IsDir() {
+		block = []*c4m.Entry{target}
+	} else {
+		srcDir = target
+		for _, re := range entriesForSubtree(srcM, srcSub) {
+			cp := *re.entry
+			cp.Depth = re.depthOffset
+			block = append(block, &cp)
+		}
 	}
 
-	// Copy entries with adjusted depth
-	for _, re := range entries {
-		cp := *re.entry // shallow copy
-		cp.Depth = dstBaseDepth + re.depthOffset
-		dstM.AddEntry(&cp)
+	if err := graftEntries(dstM, dstSub, srcDir, block); err != nil {
+		die("cp: %v", err)
 	}
-
-	dstM.SortEntries()
 	if err := saveManifest(dstC4m, dstM); err != nil {
 		die("cp: %v", err)
 	}
@@ -348,7 +348,13 @@ func cpMultiDest(src string, dests []string) {
 		// If the c4m destination has a subpath, wrap the manifest entries.
 		m := result.Manifest
 		if sub != "" {
-			m = wrapManifestInSubpath(m, sub)
+			srcDir := &c4m.Entry{Name: info.Name() + "/", Mode: info.Mode(), Timestamp: info.ModTime().UTC()}
+			wrapped, wErr := wrapManifestInSubpath(m, sub, srcDir)
+			if wErr != nil {
+				fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", wErr)
+				continue
+			}
+			m = wrapped
 		}
 
 		if sErr := saveManifest(cd.c4mFile, m); sErr != nil {
@@ -357,19 +363,177 @@ func cpMultiDest(src string, dests []string) {
 	}
 }
 
-// wrapManifestInSubpath creates a new manifest with all entries shifted
-// under the given subpath. Parent directories are created as needed.
-func wrapManifestInSubpath(m *c4m.Manifest, sub string) *c4m.Manifest {
+// wrapManifestInSubpath returns a new manifest holding m's entries under
+// the folder sub, created as graftEntries creates it (the last folder
+// takes srcDir's mode and time).
+func wrapManifestInSubpath(m *c4m.Manifest, sub string, srcDir *c4m.Entry) (*c4m.Manifest, error) {
 	wrapped := c4m.NewManifest()
-	baseDepth := strings.Count(strings.TrimSuffix(sub, "/"), "/") + 1
-	ensureParentDirs(wrapped, sub)
-	for _, e := range m.Entries {
-		cp := *e
-		cp.Depth = baseDepth + e.Depth
-		wrapped.AddEntry(&cp)
+	if err := graftEntries(wrapped, sub, srcDir, m.Entries); err != nil {
+		return nil, err
 	}
-	wrapped.SortEntries()
-	return wrapped
+	return wrapped, nil
+}
+
+// graftEntries copies block (entries in walk order, its top level at depth
+// 0) into m under the folder dstSub, "" for the root, as cp -R would:
+//   - Missing folders on the way to dstSub are created. The last one is the
+//     source folder's copy and takes srcDir's mode and stated time; the
+//     others, and the last one when srcDir is nil, have no source, so their
+//     time is null (never the clock) and their mode the default.
+//   - An entry whose name is free is placed under its new parent; a file
+//     replaces a file of the same name; a folder merges into a folder of the
+//     same name, which keeps its own line.
+//   - Every folder whose listing changed, and the folders above it, are
+//     re-derived through the library (rederiveDirs).
+//
+// The block is copied first, so it may come from m itself.
+func graftEntries(m *c4m.Manifest, dstSub string, srcDir *c4m.Entry, block []*c4m.Entry) error {
+	copies := make([]*c4m.Entry, len(block))
+	for i, e := range block {
+		cp := *e
+		copies[i] = &cp
+	}
+	parent, err := ensureDirPath(m, dstSub, srcDir)
+	if err != nil {
+		return err
+	}
+	// Into an empty folder (or an empty c4m) nothing can collide, so the
+	// block goes in whole.
+	empty := len(m.Entries) == 0
+	if parent != nil {
+		empty = len(m.Children(parent)) == 0
+	}
+	if empty {
+		base := 0
+		if parent != nil {
+			base = parent.Depth + 1
+		}
+		for _, e := range copies {
+			e.Depth += base
+		}
+		placeSubtree(m, parent, copies)
+		rederiveDirs(m, parent)
+		return nil
+	}
+	touched := []*c4m.Entry{parent}
+	for _, sub := range splitTopLevel(copies) {
+		t, err := mergeSubtree(m, parent, sub)
+		if err != nil {
+			return err
+		}
+		touched = append(touched, t...)
+	}
+	rederiveDirs(m, touched...)
+	return nil
+}
+
+// ensureDirPath returns the folder dstSub names in m, creating any part of
+// the path that is missing, as graftEntries describes. "" is the root (nil).
+func ensureDirPath(m *c4m.Manifest, dstSub string, srcDir *c4m.Entry) (*c4m.Entry, error) {
+	dstSub = strings.Trim(dstSub, "/")
+	if dstSub == "" {
+		return nil, nil
+	}
+	parts := strings.Split(dstSub, "/")
+	var parent *c4m.Entry
+	for i, part := range parts {
+		if e := childNamed(m, parent, part+"/"); e != nil {
+			parent = e
+			continue
+		}
+		if childNamed(m, parent, part) != nil {
+			return nil, fmt.Errorf("%s: not a directory", strings.Join(parts[:i+1], "/"))
+		}
+		e := &c4m.Entry{Name: part + "/", Mode: os.ModeDir | 0755, Timestamp: c4m.NullTimestamp()}
+		if parent != nil {
+			e.Depth = parent.Depth + 1
+		}
+		if i == len(parts)-1 && srcDir != nil {
+			e.Mode, e.Timestamp = srcDir.Mode, srcDir.Timestamp
+		}
+		e.Size, _, e.C4ID = deriveDir(e, nil)
+		placeSubtree(m, parent, []*c4m.Entry{e})
+		parent = e
+	}
+	return parent, nil
+}
+
+// mergeSubtree puts sub (an entry and its descendants, top at depth 0)
+// under parent, as graftEntries describes, and returns the folders whose
+// listings changed.
+func mergeSubtree(m *c4m.Manifest, parent *c4m.Entry, sub []*c4m.Entry) ([]*c4m.Entry, error) {
+	top := sub[0]
+	other := strings.TrimSuffix(top.Name, "/")
+	if !top.IsDir() {
+		other += "/"
+	}
+	if e := childNamed(m, parent, other); e != nil {
+		return nil, fmt.Errorf("%s: cannot overwrite a %s with a %s", strings.TrimSuffix(m.EntryPath(e), "/"), kind(e), kind(top))
+	}
+
+	existing := childNamed(m, parent, top.Name)
+	if existing != nil && existing.IsDir() {
+		touched := []*c4m.Entry{existing}
+		rest := sub[1:]
+		for _, e := range rest {
+			e.Depth--
+		}
+		for _, child := range splitTopLevel(rest) {
+			t, err := mergeSubtree(m, existing, child)
+			if err != nil {
+				return nil, err
+			}
+			touched = append(touched, t...)
+		}
+		return touched, nil
+	}
+	if existing != nil {
+		takeSubtree(m, existing)
+	}
+	base := 0
+	if parent != nil {
+		base = parent.Depth + 1
+	}
+	for _, e := range sub {
+		e.Depth += base
+	}
+	placeSubtree(m, parent, sub)
+	return []*c4m.Entry{parent}, nil
+}
+
+// splitTopLevel splits a block in walk order into its top-level subtrees.
+func splitTopLevel(block []*c4m.Entry) [][]*c4m.Entry {
+	var subs [][]*c4m.Entry
+	for i, e := range block {
+		if e.Depth == 0 || i == 0 {
+			subs = append(subs, []*c4m.Entry{e})
+			continue
+		}
+		subs[len(subs)-1] = append(subs[len(subs)-1], e)
+	}
+	return subs
+}
+
+// childNamed returns parent's child (a root entry when parent is nil)
+// whose name is exactly name, or nil.
+func childNamed(m *c4m.Manifest, parent *c4m.Entry, name string) *c4m.Entry {
+	kids := m.Root()
+	if parent != nil {
+		kids = m.Children(parent)
+	}
+	for _, e := range kids {
+		if e.Name == name {
+			return e
+		}
+	}
+	return nil
+}
+
+func kind(e *c4m.Entry) string {
+	if e.IsDir() {
+		return "folder"
+	}
+	return "file"
 }
 
 // --------------------------------------------------------------------------
@@ -504,25 +668,6 @@ func setFileMetadata(path string, e *c4m.Entry) {
 	}
 	if !e.Timestamp.Equal(c4m.NullTimestamp()) {
 		os.Chtimes(path, e.Timestamp, e.Timestamp)
-	}
-}
-
-// ensureParentDirs adds directory entries for all path components of subPath
-// that don't already exist in the manifest.
-func ensureParentDirs(m *c4m.Manifest, subPath string) {
-	parts := strings.Split(strings.TrimSuffix(subPath, "/"), "/")
-	for i := range parts {
-		partial := strings.Join(parts[:i+1], "/") + "/"
-		if m.GetEntry(partial) != nil {
-			continue
-		}
-		m.AddEntry(&c4m.Entry{
-			Name:      parts[i] + "/",
-			Depth:     i,
-			Mode:      os.ModeDir | 0755,
-			Size:      -1,
-			Timestamp: time.Now().UTC(),
-		})
 	}
 }
 
