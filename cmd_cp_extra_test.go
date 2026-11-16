@@ -353,60 +353,6 @@ func TestDoExtractEntry_CreatesParentDirs(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// extractEntry (wrapper that prints to stderr)
-// --------------------------------------------------------------------------
-
-func TestExtractEntry_Success(t *testing.T) {
-	te := newTestEnv(t)
-
-	m := te.loadC4m(t)
-	e := findEntry(m, "hello.txt")
-	if e == nil {
-		t.Fatal("hello.txt not found")
-	}
-
-	dstPath := filepath.Join(te.dir, "extract_wrapper", "hello.txt")
-	// Should not panic, should extract successfully
-	extractEntry(te.store, e, dstPath)
-
-	data, err := os.ReadFile(dstPath)
-	if err != nil {
-		t.Fatalf("read extracted: %v", err)
-	}
-	if string(data) != "hello world" {
-		t.Errorf("content = %q, want %q", data, "hello world")
-	}
-}
-
-func TestExtractEntry_Error(t *testing.T) {
-	te := newTestEnv(t)
-
-	// Use a real C4 ID not in this store
-	otherStorePath := filepath.Join(te.dir, "other")
-	otherStore, err := c4store.NewTreeStore(otherStorePath)
-	if err != nil {
-		t.Fatalf("NewTreeStore: %v", err)
-	}
-	realID, err := otherStore.Put(strings.NewReader("not in te.store"))
-	if err != nil {
-		t.Fatalf("store.Put: %v", err)
-	}
-
-	e := &c4m.Entry{
-		Name:      "missing.txt",
-		Mode:      0644,
-		Size:      15,
-		Depth:     0,
-		Timestamp: c4m.NullTimestamp(),
-		C4ID:      realID,
-	}
-
-	dstPath := filepath.Join(te.dir, "extract_err", "missing.txt")
-	// Should not panic, should print error to stderr
-	extractEntry(te.store, e, dstPath)
-}
-
-// --------------------------------------------------------------------------
 // storeFile
 // --------------------------------------------------------------------------
 

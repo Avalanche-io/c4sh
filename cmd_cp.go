@@ -189,20 +189,31 @@ func cpC4mToReal(src, dst string) {
 		die("cp: no content store configured (set C4_STORE or run c4 init)")
 	}
 
-	// Collect entries to extract
-	entries := entriesForSubtree(m, srcSub)
-	if len(entries) == 0 {
+	// What the source names decides the kind of copy, never how many
+	// entries it holds: a folder with one file is still a folder.
+	target := subtreeRoot(m, srcSub)
+	if srcSub != "" && target == nil {
 		die("cp: %s: not found in %s", srcSub, srcC4m)
 	}
 
-	// If srcSub points to a single file entry, extract just that
-	if len(entries) == 1 && !entries[0].entry.IsDir() {
-		e := entries[0].entry
+	// A single file: write just that.
+	if target != nil && !target.IsDir() {
 		dstPath := dst
 		if di, err := os.Stat(dst); err == nil && di.IsDir() {
-			dstPath = filepath.Join(dst, e.Name)
+			dstPath = filepath.Join(dst, target.Name)
 		}
-		extractEntry(store, e, dstPath)
+		if err := doExtractEntry(store, target, dstPath); err != nil {
+			die("cp: %v", err)
+		}
+		return
+	}
+
+	// A folder (or the whole c4m): write its contents into dst.
+	entries := entriesForSubtree(m, srcSub)
+	if len(entries) == 0 {
+		if err := os.MkdirAll(dst, 0755); err != nil {
+			die("cp: %v", err)
+		}
 		return
 	}
 
@@ -401,12 +412,7 @@ func entriesForSubtree(m *c4m.Manifest, srcSub string) []resolvedEntry {
 		return result
 	}
 
-	// Find the target entry by full path
-	target := m.GetEntry(srcSub)
-	if target == nil {
-		// Try with trailing slash for directories
-		target = m.GetEntry(srcSub + "/")
-	}
+	target := subtreeRoot(m, srcSub)
 	if target == nil {
 		return nil
 	}
@@ -438,6 +444,18 @@ func entriesForSubtree(m *c4m.Manifest, srcSub string) []resolvedEntry {
 	return result
 }
 
+// subtreeRoot returns the entry srcSub names (a folder with or without its
+// trailing slash), or nil for the c4m root or a name that isn't there.
+func subtreeRoot(m *c4m.Manifest, srcSub string) *c4m.Entry {
+	if srcSub == "" {
+		return nil
+	}
+	if e := m.GetEntry(srcSub); e != nil {
+		return e
+	}
+	return m.GetEntry(srcSub + "/")
+}
+
 // storeFile reads a file, stores its content, and returns the C4 ID.
 func storeFile(store interface{ Put(io.Reader) (c4.ID, error) }, path string) (c4.ID, error) {
 	f, err := os.Open(path)
@@ -446,15 +464,6 @@ func storeFile(store interface{ Put(io.Reader) (c4.ID, error) }, path string) (c
 	}
 	defer f.Close()
 	return store.Put(f)
-}
-
-// extractEntry extracts a single file entry from the store to disk.
-func extractEntry(store interface {
-	Open(c4.ID) (io.ReadCloser, error)
-}, e *c4m.Entry, dstPath string) {
-	if err := doExtractEntry(store, e, dstPath); err != nil {
-		fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", err)
-	}
 }
 
 // doExtractEntry extracts a single file entry from the store to disk.
