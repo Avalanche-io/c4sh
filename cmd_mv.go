@@ -130,10 +130,12 @@ func mvEntry(m *c4m.Manifest, srcSub, dstSub string) error {
 	}
 
 	// Take the entry and its subtree out, give it its new name and
-	// depths, and put it directly under its new parent. c4m.MoveEntry
-	// changes the depths but leaves the entries where they are, so the
-	// c4m package reads the moved entry as a child of whichever folder
-	// precedes it.
+	// depths, and put it directly under its new parent. This doesn't use
+	// c4m.MoveEntry, which has a defect in c4 core (through 1.0.26 and on
+	// master, being fixed separately): it changes the depths but leaves
+	// the entries where they are, so the c4m package reads the moved entry
+	// as a child of whichever folder precedes it, and it leaves both
+	// folders' sizes and C4 IDs stale.
 	oldParent := m.Parent(srcEntry)
 	targetDepth := 0
 	if newParent != nil {
