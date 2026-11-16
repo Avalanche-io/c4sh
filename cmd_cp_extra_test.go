@@ -86,13 +86,13 @@ func (m *mockStoreNoRoot) Create(id c4.ID) (io.WriteCloser, error) {
 }
 
 // --------------------------------------------------------------------------
-// ensureParentDirs
+// ensureDirPath
 // --------------------------------------------------------------------------
 
-func TestEnsureParentDirs(t *testing.T) {
+func TestEnsureDirPath(t *testing.T) {
 	t.Run("single level", func(t *testing.T) {
 		m := c4m.NewManifest()
-		ensureParentDirs(m, "src/")
+		ensureDirPath(m, "src/", nil)
 
 		found := false
 		for _, e := range m.Entries {
@@ -107,7 +107,7 @@ func TestEnsureParentDirs(t *testing.T) {
 
 	t.Run("nested path", func(t *testing.T) {
 		m := c4m.NewManifest()
-		ensureParentDirs(m, "a/b/c/")
+		ensureDirPath(m, "a/b/c/", nil)
 
 		wantDirs := map[string]int{"a/": 0, "b/": 1, "c/": 2}
 		for _, e := range m.Entries {
@@ -120,6 +120,12 @@ func TestEnsureParentDirs(t *testing.T) {
 		}
 		if len(wantDirs) > 0 {
 			t.Errorf("missing dirs: %v", wantDirs)
+		}
+		// Folders with no source folder have a null time, never the clock.
+		for _, e := range m.Entries {
+			if !e.Timestamp.Equal(c4m.NullTimestamp()) {
+				t.Errorf("%s timestamp = %v, want null", e.Name, e.Timestamp)
+			}
 		}
 	})
 
@@ -134,7 +140,7 @@ func TestEnsureParentDirs(t *testing.T) {
 		m.SortEntries()
 
 		countBefore := len(m.Entries)
-		ensureParentDirs(m, "src/lib/")
+		ensureDirPath(m, "src/lib/", nil)
 
 		// Should add lib/ but not re-add src/
 		if len(m.Entries) != countBefore+1 {
