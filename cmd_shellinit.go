@@ -97,8 +97,19 @@ function ls {
     fi
 }
 
-# Save the user's cat command (alias or binary) before overriding.
-__c4sh_real_cat="$(alias cat 2>/dev/null | sed "s/^alias cat='//" | sed "s/'$//" || echo "command cat")"
+# Save the user's cat command (alias or binary) before overriding. The
+# alias's value comes from the shell, not from parsing alias's output,
+# whose format differs: zsh keeps aliases in $aliases; bash prints
+# alias cat='value' with the value as one shell-quoted word, which eval
+# assigns exactly, embedded quotes included.
+__c4sh_real_cat=""
+if [ -n "$ZSH_VERSION" ]; then
+    __c4sh_real_cat="${aliases[cat]}"
+else
+    __c4sh_alias_cat="$(alias cat 2>/dev/null)"
+    [ -n "$__c4sh_alias_cat" ] && eval "__c4sh_real_cat=${__c4sh_alias_cat#alias cat=}"
+    unset __c4sh_alias_cat
+fi
 [ -z "$__c4sh_real_cat" ] && __c4sh_real_cat="command cat"
 unalias cat 2>/dev/null
 
