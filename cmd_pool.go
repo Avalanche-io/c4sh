@@ -18,6 +18,9 @@ type poolResult struct {
 	Copied  int
 	Skipped int
 	Missing int
+	// MissingEntries names each missing object: its path in the c4m and
+	// its C4 ID.
+	MissingEntries []string
 }
 
 // runPool implements "c4sh pool <c4m> <dir>" — bundle a c4m file with all
@@ -60,6 +63,9 @@ func runPool(args []string) {
 		die("pool: %v", err)
 	}
 
+	for _, miss := range res.MissingEntries {
+		fmt.Fprintf(os.Stderr, "c4sh: pool: missing %s\n", miss)
+	}
 	fmt.Printf("Pool: %d objects copied, %d skipped, %d missing\n", res.Copied, res.Skipped, res.Missing)
 	if res.Missing > 0 {
 		osExit(1)
@@ -80,7 +86,7 @@ func poolManifest(m *c4m.Manifest, src c4store.Store, c4mPath, outDir string) (p
 	seen := make(map[c4.ID]bool)
 
 	for _, e := range m.Entries {
-		if e.C4ID.IsNil() || seen[e.C4ID] {
+		if e.C4ID.IsNil() || !poolNeedsObject(m, e) || seen[e.C4ID] {
 			continue
 		}
 		seen[e.C4ID] = true
@@ -93,6 +99,7 @@ func poolManifest(m *c4m.Manifest, src c4store.Store, c4mPath, outDir string) (p
 		rc, err := src.Open(e.C4ID)
 		if err != nil {
 			res.Missing++
+			res.MissingEntries = append(res.MissingEntries, strings.TrimSuffix(m.EntryPath(e), "/")+" "+e.C4ID.String())
 			continue
 		}
 
@@ -117,6 +124,28 @@ func poolManifest(m *c4m.Manifest, src c4store.Store, c4mPath, outDir string) (p
 
 	return res, nil
 }
+
+// poolNeedsObject reports whether a bundle needs e's C4 ID from the store.
+// The bundle carries its c4m, and a listing travels with the c4m that
+// describes it: a folder whose children the c4m lists, a known-empty
+// folder, and a range whose ID list the c4m holds inline need nothing
+// more. File content does, and so does a folder listed without its
+// children or a range whose ID list isn't inline: those are addressed
+// by their C4 ID, like any content.
+func poolNeedsObject(m *c4m.Manifest, e *c4m.Entry) bool {
+	switch {
+	case e.IsDir():
+		return len(m.Children(e)) == 0 && e.C4ID != emptyID
+	case e.IsSequence:
+		_, inline := m.RangeData[e.C4ID]
+		return !inline
+	}
+	return true
+}
+
+// emptyID is the C4 ID of no bytes: an empty file's content and an empty
+// folder's listing.
+var emptyID = c4.Identify(strings.NewReader(""))
 
 // copyFile copies a regular file.
 func copyFile(src, dst string) error {
