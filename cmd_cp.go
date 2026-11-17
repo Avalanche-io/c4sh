@@ -241,6 +241,11 @@ func cpC4mToReal(src, dst string) {
 	for _, e := range result.Errors {
 		fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", e)
 	}
+	// Any entry the reconciler couldn't write is a failed copy. Through
+	// 1.0.26 cp printed the errors and still exited 0.
+	if len(result.Errors) > 0 {
+		osExit(1)
+	}
 }
 
 // cpC4mToC4m copies entries between c4m files. No content I/O — just
@@ -332,10 +337,14 @@ func cpMultiDest(src string, dests []string) {
 		die("cp: %v", err)
 	}
 
-	// Report per-target errors.
+	// Report per-target errors. Any of them makes the copy a failure,
+	// reported once every destination has been written (through 1.0.26
+	// cp printed them and still exited 0).
+	failed := false
 	for _, tr := range result.Targets {
 		for _, e := range tr.Errors {
 			fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", tr.Target, e)
+			failed = true
 		}
 	}
 
@@ -366,6 +375,7 @@ func cpMultiDest(src string, dests []string) {
 			wrapped, wErr := wrapManifestInSubpath(m, sub, srcDir)
 			if wErr != nil {
 				fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", wErr)
+				failed = true
 				continue
 			}
 			m = wrapped
@@ -373,7 +383,11 @@ func cpMultiDest(src string, dests []string) {
 
 		if sErr := saveManifest(cd.c4mFile, m); sErr != nil {
 			fmt.Fprintf(os.Stderr, "c4sh: cp: %v\n", sErr)
+			failed = true
 		}
+	}
+	if failed {
+		osExit(1)
 	}
 }
 
