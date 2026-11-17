@@ -85,30 +85,54 @@ func poolManifest(m *c4m.Manifest, src c4store.Store, c4mPath, outDir string) (p
 	var res poolResult
 	seen := make(map[c4.ID]bool)
 
-	for _, e := range m.Entries {
-		if e.C4ID.IsNil() || !poolNeedsObject(m, e) || seen[e.C4ID] {
-			continue
+	// bundle copies one object into the bundle's store, or counts it
+	// missing under name (its path in the c4m).
+	bundle := func(id c4.ID, name string) error {
+		if seen[id] {
+			return nil
 		}
-		seen[e.C4ID] = true
-
-		if dst.Has(e.C4ID) {
+		seen[id] = true
+		if dst.Has(id) {
 			res.Skipped++
-			continue
+			return nil
 		}
-
-		rc, err := src.Open(e.C4ID)
+		rc, err := src.Open(id)
 		if err != nil {
 			res.Missing++
-			res.MissingEntries = append(res.MissingEntries, strings.TrimSuffix(m.EntryPath(e), "/")+" "+e.C4ID.String())
+			res.MissingEntries = append(res.MissingEntries, name+" "+id.String())
+			return nil
+		}
+		defer rc.Close()
+		if _, err := dst.Put(rc); err != nil {
+			return fmt.Errorf("store %s: %v", id, err)
+		}
+		res.Copied++
+		return nil
+	}
+
+	for _, e := range m.Entries {
+		if e.C4ID.IsNil() {
 			continue
 		}
-
-		if _, err := dst.Put(rc); err != nil {
-			rc.Close()
-			return res, fmt.Errorf("store %s: %v", e.C4ID, err)
+		if poolNeedsObject(m, e) {
+			if err := bundle(e.C4ID, strings.TrimSuffix(m.EntryPath(e), "/")); err != nil {
+				return res, err
+			}
 		}
-		rc.Close()
-		res.Copied++
+		if !e.IsSequence {
+			continue
+		}
+		// A range's ID list names its frames' content, which the bundle
+		// needs like any file's.
+		dir := path.Dir(m.EntryPath(e))
+		for _, f := range rangeFrames(m, e, src) {
+			if f.C4ID.IsNil() {
+				continue
+			}
+			if err := bundle(f.C4ID, path.Join(dir, f.Name)); err != nil {
+				return res, err
+			}
+		}
 	}
 
 	// Copy the c4m file
@@ -141,6 +165,46 @@ func poolNeedsObject(m *c4m.Manifest, e *c4m.Entry) bool {
 		return !inline
 	}
 	return true
+}
+
+// rangeFrames returns a folded range's frames, each with its own C4 ID,
+// as the library expands them from the range's ID list: inline in the c4m,
+// or else the store object the range's C4 ID addresses. Without the list
+// there are no frames to name, as a folder whose listing isn't available
+// has no children to name. A range is never expanded into frames carrying
+// its own C4 ID, which names the list and no frame.
+func rangeFrames(m *c4m.Manifest, e *c4m.Entry, src c4store.Store) []*c4m.Entry {
+	list, ok := m.RangeData[e.C4ID]
+	if !ok {
+		rc, err := src.Open(e.C4ID)
+		if err != nil {
+			return nil
+		}
+		b, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil || !c4m.IsIDListContent(b) {
+			return nil
+		}
+		list = string(b)
+	}
+
+	one := c4m.NewManifest()
+	r := *e
+	r.Depth = 0
+	one.AddEntry(&r)
+	one.RangeData = map[c4.ID]string{e.C4ID: list}
+	expanded, _, err := c4m.NewSequenceExpander(c4m.SequenceEmbedded).ExpandManifest(one)
+	if err != nil {
+		return nil
+	}
+	var frames []*c4m.Entry
+	for _, f := range expanded.Entries {
+		if f.IsSequence || f.C4ID == e.C4ID {
+			continue
+		}
+		frames = append(frames, f)
+	}
+	return frames
 }
 
 // emptyID is the C4 ID of no bytes: an empty file's content and an empty
