@@ -215,7 +215,12 @@ __c4sh_complete() {
     fi
 }
 
-compdef __c4sh_complete ls cat cp mv rm mkdir cd
+# compdef exists only once compinit has run. Without it there is no
+# completion system to register with, and calling it would print
+# "command not found: compdef" every time a shell starts.
+if (( $+functions[compdef] )); then
+    compdef __c4sh_complete ls cat cp mv rm mkdir cd
+fi
 `
 
 const powershellScript = `
