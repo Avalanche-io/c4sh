@@ -59,10 +59,10 @@ Invoke-Expression (c4sh shell-init --powershell)
 
 ### Placement matters
 
-The `eval` line must come **after** any aliases for commands c4sh wraps.
-c4sh captures existing aliases (like `cat` aliased to `bat`) and preserves
-them when you're not in a c4m. If the eval runs before the alias is
-defined, the fallback will be the plain binary instead of your alias.
+The `eval` line must come **after** any `cat` alias. c4sh captures an
+existing `cat` alias (like `cat` aliased to `bat`), in bash and in zsh,
+and uses it when you're not in a c4m. If the alias is defined after the
+eval, it replaces c4sh's `cat`, which then no longer reads c4m entries.
 
 ```bash
 # ~/.bashrc — correct order
@@ -124,7 +124,7 @@ The output is a valid c4m colon path that other c4sh commands understand.
 | Command | In c4m context | Outside context |
 |---------|---------------|-----------------|
 | `cd` | Navigate within c4m; `cd ..` from root exits | Normal `cd` |
-| `ls` | List c4m entries; `-i` shows C4 IDs | Your normal `ls` (with aliases) |
+| `ls` | List c4m entries; `-li` shows C4 IDs | Your normal `ls` (with aliases) |
 | `cat` | Stream content from store by C4 ID | Your normal `cat` (preserves bat alias) |
 | `cp` | Copy across the c4m boundary | Normal `cp` |
 | `mv` | Rename c4m entries | Normal `mv` |
@@ -186,7 +186,7 @@ when `project.c4m` exists.
 ```bash
 cd project.c4m                   # enter the c4m
 ls                               # names, directories marked with /
-ls -l shots/010/                 # mode, size, timestamp, name, C4 ID
+ls -l shots/010/                 # mode, size, date, name
 cat shots/010/comp.nk            # streams content from the store
 mkdir deliveries/v4/
 mv shots/010/comp.nk deliveries/v4/
@@ -207,7 +207,7 @@ is still retrievable by C4 ID.
 Bundle a c4m with the store objects it references:
 
 ```bash
-pool delivery.c4m ./bundle/
+c4sh pool delivery.c4m ./bundle/
 ```
 
 The bundle is self-contained: the c4m, a store with only the referenced
@@ -217,7 +217,7 @@ Unix tools — no c4 installation required on the receiving end.
 Absorb a received bundle into your local store:
 
 ```bash
-ingest ./bundle/
+c4sh ingest ./bundle/
 ```
 
 `ingest` copies store objects into your local store and copies any c4m
@@ -227,8 +227,8 @@ usable.
 ## Sync over ssh
 
 ```bash
-rsync delivery.c4m remote:/deliveries/
-rsync remote:/deliveries/project.c4m .
+c4sh rsync delivery.c4m remote:/deliveries/
+c4sh rsync remote:/deliveries/project.c4m .
 ```
 
 Uses rsync internally. Objects already present on the remote side are
@@ -255,7 +255,7 @@ skipped.
 
 ## How it works
 
-A c4m file is one entry per line — mode, size, timestamp, name,
+A c4m file is one entry per line — mode, timestamp, size, name,
 C4 ID — so `grep`, `awk`, `sort`, and `diff` all work on it natively.
 c4sh adds filesystem semantics on top: `cd` sets context, `ls` reads
 entries, `mv` rewrites names and depths. It's a text editor that speaks
@@ -277,7 +277,7 @@ once, access from either tool.
 
 ## Design Decisions
 
-See the [FAQ](https://github.com/Avalanche-io/c4/blob/main/docs/faq.md) for design decisions including SHA-512 permanence, the c4m format, and content store scaling.
+See the [FAQ](https://github.com/Avalanche-io/c4/blob/master/docs/faq.md) for design decisions including SHA-512 permanence, the c4m format, and content store scaling.
 
 ## Requirements
 
