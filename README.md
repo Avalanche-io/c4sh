@@ -59,15 +59,10 @@ Invoke-Expression (c4sh shell-init --powershell)
 
 ### Placement matters
 
-The `eval` line must come **after** any aliases for commands c4sh wraps.
-In bash, c4sh captures an existing `cat` alias (like `cat` aliased to
-`bat`) and uses it when you're not in a c4m. If the alias is defined after
-the eval, it replaces c4sh's `cat`, which then no longer reads c4m
-entries.
-
-In zsh, 1.0.x doesn't capture a `cat` alias: with one defined before the
-eval, `cat` outside a c4m fails with `unmatched '`. Don't alias `cat` in
-zsh.
+The `eval` line must come **after** any `cat` alias. c4sh captures an
+existing `cat` alias (like `cat` aliased to `bat`), in bash and in zsh,
+and uses it when you're not in a c4m. If the alias is defined after the
+eval, it replaces c4sh's `cat`, which then no longer reads c4m entries.
 
 ```bash
 # ~/.bashrc — correct order
