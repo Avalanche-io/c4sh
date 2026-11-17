@@ -124,30 +124,31 @@ func cpRealToC4m(src, dst string) {
 			die("cp: scan: %v", err)
 		}
 
-		// Store content for each file entry. The scanned manifest is in
-		// walk order, so the kept entries are a block to graft.
+		// Every entry is kept exactly as the scan describes it, links
+		// included, so the capture is what c4 id gives for the same tree
+		// and every folder's size and C4 ID counts exactly the entries the
+		// c4m lists. Through 1.0.26 links were dropped here while their
+		// folders kept the aggregates that counted them, so the c4m
+		// described no tree that exists. The scanned manifest is in walk
+		// order, so the entries are a block to graft.
 		var block []*c4m.Entry
 		for _, e := range scanned.Entries {
 			cp := *e // shallow copy
-
-			if e.IsDir() {
-				block = append(block, &cp)
+			block = append(block, &cp)
+			if e.IsDir() || e.C4ID.IsNil() {
 				continue
 			}
-
-			if !e.Mode.IsRegular() {
-				continue
-			}
-
+			// Content goes to the store as c4 id -s stores it: the bytes
+			// the path opens to, which for a link to a file are its
+			// target's. A link to a folder opens to no content.
 			relPath := scanned.EntryPath(e)
 			absPath := filepath.Join(src, filepath.FromSlash(relPath))
-			id, sErr := storeFile(store, absPath)
-			if sErr != nil {
-				fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", relPath, sErr)
+			if fi, sErr := os.Stat(absPath); sErr != nil || !fi.Mode().IsRegular() {
 				continue
 			}
-			cp.C4ID = id
-			block = append(block, &cp)
+			if _, sErr := storeFile(store, absPath); sErr != nil {
+				fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", relPath, sErr)
+			}
 		}
 		// A folder the copy creates for the source takes the source's
 		// observed mode and time.
@@ -336,6 +337,19 @@ func cpMultiDest(src string, dests []string) {
 		for _, e := range tr.Errors {
 			fmt.Fprintf(os.Stderr, "c4sh: cp: %s: %v\n", tr.Target, e)
 		}
+	}
+
+	// Distribute's manifest leaves folder C4 IDs null. Each folder's size,
+	// time and C4 ID are derived from its listed children through the
+	// library, deepest first, before any c4m is saved.
+	if result.Manifest != nil {
+		var dirs []*c4m.Entry
+		for _, e := range result.Manifest.Entries {
+			if e.IsDir() {
+				dirs = append(dirs, e)
+			}
+		}
+		rederiveDirs(result.Manifest, dirs...)
 	}
 
 	// Save manifest for each c4m destination.
