@@ -220,16 +220,21 @@ func deriveDir(dir *c4m.Entry, children []*c4m.Entry) (int64, time.Time, c4.ID) 
 			nullChildSize = true
 		}
 	}
+	// The folder's C4 ID is its listing's, and it is stated before the
+	// propagation: from core 1.0.27 PropagateMetadata gives a childless
+	// folder size 0 only when its ID is the empty listing's, and here the
+	// children are known (the folder holds exactly these), so an empty
+	// folder is one this c4m states.
+	pr, pw := io.Pipe()
+	go func() { pw.CloseWithError(listing.WriteCanonical(pw)) }()
+	id := c4.Identify(pr)
+	scope[0].C4ID = id
 	c4m.PropagateMetadata(scope)
 	size := scope[0].Size
 	if nullChildSize {
-		// PropagateMetadata reads a childless folder with a null size as
-		// empty; here its listing is elsewhere, so the size is unknown.
-		size = -1
+		size = -1 // a child's size is unknown, so the folder's is
 	}
-	pr, pw := io.Pipe()
-	go func() { pw.CloseWithError(listing.WriteCanonical(pw)) }()
-	return size, scope[0].Timestamp, c4.Identify(pr)
+	return size, scope[0].Timestamp, id
 }
 
 // storeRoot returns the filesystem root of a store, if it has one.
