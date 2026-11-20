@@ -231,8 +231,17 @@ c4sh rsync delivery.c4m remote:/deliveries/
 c4sh rsync remote:/deliveries/project.c4m .
 ```
 
-Uses rsync internally. Objects already present on the remote side are
-skipped.
+Uses rsync internally. A push sends the c4m and the store objects it
+names: each file's content, and each listing and range ID list it
+references, when your store holds them. Nothing else in your store is
+sent. A pull fetches the c4m, then the objects it names. Objects already
+present on the receiving side are skipped, and the counts printed are what
+was sent or fetched. A file whose content is missing on the sending side
+is named, and the command exits 1 after sending the rest.
+
+The remote store is `.c4/store` under the remote home (set
+`C4_REMOTE_STORE` for another path). Each object lands where that store
+looks for it, flat or split; a remote with no store yet gets a new one.
 
 ## Commands
 
@@ -247,7 +256,7 @@ skipped.
 | `mkdir` | Create directory entries (`-p` for parents) | no |
 | `pool` | Bundle c4m + store objects for transport | yes |
 | `ingest` | Absorb a bundle into local store | yes |
-| `rsync` | Sync c4m + content over ssh | yes |
+| `rsync` | Sync a c4m and the content it names over ssh | yes |
 | `shell-init` | Output shell integration script | no |
 | `version` | Print c4sh version | no |
 
