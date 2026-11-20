@@ -720,7 +720,7 @@ func poolInternal(t *testing.T, c4mPath, outDir string, srcStore *c4store.TreeSt
 		t.Fatalf("pool copyFile: %v", err)
 	}
 
-	if err := writeExtractScript(outDir, filepath.Base(c4mPath), m); err != nil {
+	if err := writeExtractScript(outDir, filepath.Base(c4mPath), m, nil); err != nil {
 		t.Fatalf("pool writeExtractScript: %v", err)
 	}
 }

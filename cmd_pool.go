@@ -142,7 +142,7 @@ func poolManifest(m *c4m.Manifest, src c4store.Store, c4mPath, outDir string) (p
 	}
 
 	// Generate self-extracting script
-	if err := writeExtractScript(outDir, filepath.Base(c4mPath), m); err != nil {
+	if err := writeExtractScript(outDir, filepath.Base(c4mPath), m, src); err != nil {
 		return res, fmt.Errorf("write extract.sh: %v", err)
 	}
 
@@ -176,6 +176,9 @@ func poolNeedsObject(m *c4m.Manifest, e *c4m.Entry) bool {
 func rangeFrames(m *c4m.Manifest, e *c4m.Entry, src c4store.Store) []*c4m.Entry {
 	list, ok := m.RangeData[e.C4ID]
 	if !ok {
+		if src == nil {
+			return nil
+		}
 		rc, err := src.Open(e.C4ID)
 		if err != nil {
 			return nil
@@ -237,7 +240,15 @@ func copyFile(src, dst string) error {
 // writeExtractScript generates a portable shell script that materializes
 // the c4m contents using only standard Unix tools — no c4 installation required.
 // All paths are shell-escaped to prevent injection from malicious entry names.
-func writeExtractScript(outDir, c4mName string, m *c4m.Manifest) error {
+//
+// A folded range is written as its frames, one copy each: the names come
+// from the range expression and the content from each frame's C4 ID, as
+// the library expands them from the range's ID list (inline, or in src).
+// The bundle carries every frame (poolManifest). Without the list there are
+// no frames to name, so the script says so and fails. A range of symbolic
+// links is refused: its folded line gives the members' targets only as one
+// range expression, not one by one.
+func writeExtractScript(outDir, c4mName string, m *c4m.Manifest, src c4store.Store) error {
 	scriptPath := filepath.Join(outDir, "extract.sh")
 	f, err := os.OpenFile(scriptPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 	if err != nil {
@@ -277,19 +288,48 @@ func writeExtractScript(outDir, c4mName string, m *c4m.Manifest) error {
 			continue
 		}
 
-		if e.C4ID.IsNil() {
+		if e.IsSequence {
+			rangePath := buildPath(dirStack, e)
+			if e.IsSymlink() {
+				fmt.Fprintf(f, "echo %s >&2; STATUS=1\n", shellEscape("error: "+rangePath+
+					": a range of symbolic links is not extracted: its folded line gives the members' targets only as one range expression"))
+				continue
+			}
+			frames := rangeFrames(m, e, src)
+			if len(frames) == 0 {
+				fmt.Fprintf(f, "echo %s >&2; STATUS=1\n", shellEscape("warning: "+rangePath+
+					": no ID list for this range in the bundle, so its frames can't be named"))
+				continue
+			}
+			dir := path.Dir(rangePath)
+			for _, fr := range frames {
+				if fr.C4ID.IsNil() {
+					continue
+				}
+				writeCopy(f, shellEscape(path.Join(dir, fr.Name)), fr.C4ID)
+			}
 			continue
 		}
 
-		// C4 IDs are base58 only (safe for shell), find in store trie
-		idStr := e.C4ID.String()
-		fmt.Fprintf(f, "SRC=$(find \"$STORE\" -name '%s' -print -quit 2>/dev/null)\n", idStr)
-		fmt.Fprintf(f, "if [ -n \"$SRC\" ]; then cp \"$SRC\" \"$OUT\"/%s || STATUS=1; else echo \"warning: missing %s\" >&2; STATUS=1; fi\n", fullPath, idStr)
+		if e.C4ID.IsNil() {
+			continue
+		}
+		writeCopy(f, fullPath, e.C4ID)
 	}
 
 	fmt.Fprintf(f, "if [ \"$STATUS\" -ne 0 ]; then echo 'Done, with errors.' >&2; exit 1; fi\n")
 	fmt.Fprintf(f, "echo 'Done.'\n")
 	return nil
+}
+
+// writeCopy writes the script lines that copy the store object id to
+// $OUT/<fullPath> (already shell-escaped), or warn that it is missing. C4
+// IDs are base58 only, safe in the shell; the object is found anywhere in
+// the bundle's store trie.
+func writeCopy(f io.Writer, fullPath string, id c4.ID) {
+	idStr := id.String()
+	fmt.Fprintf(f, "SRC=$(find \"$STORE\" -name '%s' -print -quit 2>/dev/null)\n", idStr)
+	fmt.Fprintf(f, "if [ -n \"$SRC\" ]; then cp \"$SRC\" \"$OUT\"/%s || STATUS=1; else echo \"warning: missing %s\" >&2; STATUS=1; fi\n", fullPath, idStr)
 }
 
 // shellEscape wraps a string in single quotes, escaping any embedded single

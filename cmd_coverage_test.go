@@ -1201,7 +1201,7 @@ func TestWriteExtractScript_DirStructure(t *testing.T) {
 	dir := t.TempDir()
 	m := buildSimpleManifest()
 
-	if err := writeExtractScript(dir, "test.c4m", m); err != nil {
+	if err := writeExtractScript(dir, "test.c4m", m, nil); err != nil {
 		t.Fatalf("writeExtractScript: %v", err)
 	}
 
@@ -1528,7 +1528,7 @@ func TestWriteExtractScript_NilIDFiles(t *testing.T) {
 	})
 	m.SortEntries()
 
-	if err := writeExtractScript(dir, "test.c4m", m); err != nil {
+	if err := writeExtractScript(dir, "test.c4m", m, nil); err != nil {
 		t.Fatalf("writeExtractScript: %v", err)
 	}
 
