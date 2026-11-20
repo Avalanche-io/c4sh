@@ -26,7 +26,7 @@ go build .
 go vet ./...
 ```
 
-During development, `go.mod` uses a `replace` directive to reference a local checkout of the c4 library. For releases, this is replaced with a tagged version.
+`go.mod` requires the c4 library by version. Between releases a line may pin a core commit by pseudo-version; the suite release moves it to the tag.
 
 ## Code Style
 

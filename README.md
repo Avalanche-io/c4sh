@@ -92,8 +92,9 @@ PS1='\u@\h \w$(__c4sh_context) $ '
 ```
 
 ```zsh
-# zsh
-PROMPT='%n@%m %~ $(__c4sh_context) %# '
+# zsh (needs prompt_subst)
+setopt prompt_subst
+PROMPT='%n@%m %~$(__c4sh_context) %# '
 ```
 
 The context string includes the c4m name (without `.c4m` extension) and
@@ -211,8 +212,12 @@ c4sh pool delivery.c4m ./bundle/
 ```
 
 The bundle is self-contained: the c4m, a store with only the referenced
-objects, and an `extract.sh` that recreates the filesystem with standard
-Unix tools — no c4 installation required on the receiving end.
+objects, and an `extract.sh` that writes its files and folders with
+standard Unix tools — no c4 installation required on the receiving end.
+It restores content only: files get the store's permissions and the
+current time, a symbolic link is written as a copy of its target, and a
+link to a folder fails. For modes, times and links, `c4sh ingest` the
+bundle and then `c4sh cp delivery.c4m: <dir>/`.
 
 Absorb a received bundle into your local store:
 
@@ -272,9 +277,10 @@ shell.
 
 When piped, `ls` outputs one entry per line (matching real `ls` behavior).
 
-Content lives in a shared store (`C4_STORE` or `~/.c4/store`), the same
-store the [c4](https://github.com/Avalanche-io/c4) CLI uses. Store
-once, access from either tool.
+Content lives in a shared store, the one named by `C4_STORE` or by the
+`store` line in `~/.c4/config`, the same store the
+[c4](https://github.com/Avalanche-io/c4) CLI uses. Store once, access
+from either tool.
 
 ## Known limitations
 
@@ -283,6 +289,8 @@ once, access from either tool.
   c4m context inline.
 - `rsync` requires a local filesystem store (not S3).
 - Commands inside c4m context silently ignore unrecognized flags.
+- `mv` and `rm` re-derive the folders above an edit, but a link to a
+  folder keeps the C4 ID it had when it was captured.
 
 ## Design Decisions
 
@@ -290,7 +298,9 @@ See the [FAQ](https://github.com/Avalanche-io/c4/blob/master/docs/faq.md) for de
 
 ## Requirements
 
-- [c4](https://github.com/Avalanche-io/c4) CLI
+- the [c4](https://github.com/Avalanche-io/c4) CLI is optional: c4sh
+  includes the library; you want `c4` for `c4 diff`, `c4 log` and
+  `c4 patch`
 - bash, zsh, or PowerShell/pwsh
 - rsync (for `c4sh rsync`)
 
