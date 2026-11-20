@@ -366,3 +366,39 @@ func TestRsyncPushSendsARangesFramesAndList(t *testing.T) {
 		t.Error("an object the c4m doesn't name reached the remote")
 	}
 }
+
+// A folder that exists only in the other letter case, as a store built on a
+// case-insensitive disk has it ("c4/1B" holding "c41b…"), sends the object
+// to the exact-case folder: the same folder on a case-insensitive disk, and
+// the one rsync makes, and every release's exact-case lookup finds, on a
+// case-sensitive one. Into "c4/1B" itself, a case-sensitive remote's
+// exact-case lookup would never look (CI on Linux, 2026-11-20).
+func TestRsyncPlaceUsesTheExactCaseFolder(t *testing.T) {
+	var id c4.ID
+	for i := 0; ; i++ {
+		id = c4.Identify(strings.NewReader(fmt.Sprintf("case %d\n", i)))
+		seg := id.String()[2:4]
+		if strings.ToUpper(seg) != seg {
+			break
+		}
+	}
+	s := id.String()
+	other := strings.ToUpper(s[2:4])
+	l := remoteLayout{exists: true,
+		dirs: map[string]bool{"": true, "c4": true, "c4/" + other: true},
+		fold: map[string]string{"c4": "c4", strings.ToLower("c4/" + other): "c4/" + other}}
+	want := "c4/" + s[2:4] + "/" + s
+	if got := l.place(id); got != want {
+		t.Errorf("place = %s, want %s", got, want)
+	}
+	levels := l.levels(id)
+	for _, p := range []string{s, "c4/" + s, want, "c4/" + other + "/" + s} {
+		found := false
+		for _, q := range levels {
+			found = found || q == p
+		}
+		if !found {
+			t.Errorf("levels %v lacks %s", levels, p)
+		}
+	}
+}

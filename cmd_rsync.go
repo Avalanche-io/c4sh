@@ -333,8 +333,8 @@ type remoteLayout struct {
 	// fold maps each folder's lower-case path to the path as the remote
 	// spells it. A store made on a case-insensitive filesystem holds IDs
 	// differing only in case under one folder, named by whichever came
-	// first ("c4/1B" holding "c41b…"); the store's lookup descends into it
-	// for either case, and so does place.
+	// first ("c4/1B" holding "c41b…"); place sends such an ID to the
+	// exact-case folder, and a pull also looks in the folder as spelt.
 	fold map[string]string
 }
 
@@ -350,9 +350,13 @@ func (l remoteLayout) place(id c4.ID) string {
 			dir = next
 			continue
 		}
-		if v, ok := l.fold[strings.ToLower(next)]; ok {
-			dir = v
-			continue
+		if _, ok := l.fold[strings.ToLower(next)]; ok {
+			// Only the other letter case exists (a store built on a
+			// case-insensitive disk). The exact-case folder is that same
+			// folder on a case-insensitive disk; on a case-sensitive one
+			// rsync makes it, and the exact-case lookup every release
+			// starts with finds the object there.
+			return path.Join(next, s)
 		}
 		break
 	}
@@ -374,6 +378,8 @@ func (l remoteLayout) levels(id c4.ID) []string {
 			if !ok {
 				break
 			}
+			// Where place puts it, and the folder as the remote spells it.
+			out = append(out, path.Join(next, s))
 			next = v
 		}
 		dir = next
