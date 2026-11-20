@@ -211,13 +211,7 @@ func cpC4mToReal(src, dst string) {
 	}
 
 	// Build a sub-manifest from the resolved entries for reconcile.
-	subM := c4m.NewManifest()
-	for _, re := range entries {
-		cp := *re.entry
-		cp.Depth = re.depthOffset
-		subM.AddEntry(&cp)
-	}
-	subM.SortEntries()
+	subM := cpSubManifest(m, entries)
 
 	// Use reconcile to materialize the manifest to the directory.
 	// The store implements reconcile.ContentSource (Has + Open).
@@ -292,8 +286,47 @@ func cpC4mToC4m(src, dst string) {
 	if err := graftEntries(dstM, dstSub, srcDir, block); err != nil {
 		die("cp: %v", err)
 	}
+	keepRangeLists(dstM, srcM, block)
 	if err := saveManifest(dstC4m, dstM); err != nil {
 		die("cp: %v", err)
+	}
+}
+
+// cpSubManifest builds the manifest cp hands to reconcile for the resolved
+// entries: each at its depth below the copied folder, with the ID list of
+// every folded range among them, so a range whose list is only inline in
+// the source c4m still names its frames.
+func cpSubManifest(m *c4m.Manifest, entries []resolvedEntry) *c4m.Manifest {
+	subM := c4m.NewManifest()
+	var copied []*c4m.Entry
+	for _, re := range entries {
+		cp := *re.entry
+		cp.Depth = re.depthOffset
+		subM.AddEntry(&cp)
+		copied = append(copied, &cp)
+	}
+	subM.SortEntries()
+	keepRangeLists(subM, m, copied)
+	return subM
+}
+
+// keepRangeLists copies into dst the inline ID list src holds for each
+// folded range among entries. A range's list names its frames as a
+// listing names a folder's children; a copy that drops it drops the
+// frames' C4 IDs.
+func keepRangeLists(dst, src *c4m.Manifest, entries []*c4m.Entry) {
+	for _, e := range entries {
+		if !e.IsSequence {
+			continue
+		}
+		list, ok := src.RangeData[e.C4ID]
+		if !ok {
+			continue
+		}
+		if dst.RangeData == nil {
+			dst.RangeData = make(map[c4.ID]string)
+		}
+		dst.RangeData[e.C4ID] = list
 	}
 }
 
