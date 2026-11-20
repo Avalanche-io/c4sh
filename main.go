@@ -94,8 +94,8 @@ Usage:
   c4sh mkdir [-p] <path...>    Create directory entries
   c4sh pool <c4m> <dir>        Bundle c4m + referenced store objects
   c4sh ingest <bundle>         Absorb a pool into local store
-  c4sh rsync <c4m> <remote:>   Push c4m + store objects to remote
-  c4sh rsync <remote:c4m> .    Pull c4m + store objects from remote
+  c4sh rsync <c4m> <remote:>   Push a c4m and the objects it names
+  c4sh rsync <remote:c4m> .    Pull a c4m and the objects it names
 
 Setup:
   eval "$(c4sh shell-init)"    Add to .bashrc/.zshrc
